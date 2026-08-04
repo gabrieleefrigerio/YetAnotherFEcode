@@ -15,6 +15,7 @@ classdef ImplicitNewmark < handle
         MaxNRit = 10
         ATS = false     % where adaptive time stepping should be on (true) or not (false)
         hmin = 0        % minimum timestep size (only used when ATS = true)
+        hmax = 1e-3
         NROpt = 3       % Maximum no. of N-R Iterations
         linear = false  % whether system is linear or not
     end
@@ -34,6 +35,7 @@ classdef ImplicitNewmark < handle
             addParameter(p,'linear', TI.linear, @(x)validateattributes(x,{'logical'},{'nonempty'}));
             addParameter(p,'hmin', TI.hmin, @(x)validateattributes(x, ...
                 {'numeric'},{'nonempty'}) );
+            addParameter(p,'hmax', TI.hmax, @(x)validateattributes(x, {'numeric'},{'nonempty'}) );
             addParameter(p,'ATS', TI.ATS, @(x)validateattributes(x,{'logical'},{'nonempty'}));
             
             parse(p,varargin{:});
@@ -47,6 +49,7 @@ classdef ImplicitNewmark < handle
             TI.tol = p.Results.RelTol;
             TI.MaxNRit = p.Results.MaxNRit;
             TI.hmin = p.Results.hmin;
+            TI.hmax = p.Results.hmax; 
             TI.linear = p.Results.linear;
         end
         function Integrate(obj,x0,xd0,xdd0,tmax, Residual)            

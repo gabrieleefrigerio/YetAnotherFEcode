@@ -1,27 +1,25 @@
-classdef MasslessCBBuilder < handle
+classdef RomMCB < handle
     properties
-        Assembly, P, numModes, nl_dof, M_r, K_r, alpha
+        Structure, P, Pc, numModes, contactDofs, n_bnd, M_r, K_r, alpha
     end
     
     methods
-        function obj = MasslessCBBuilder(yafec_assembly, num_fixed_modes, nonlinear_dof)
-            obj.Assembly = yafec_assembly;
+        function obj = RomMCB(dummy_struct, num_fixed_modes, contact_dofs_constrained)
+            obj.Structure = dummy_struct;
             obj.numModes = num_fixed_modes;
-            obj.nl_dof = nonlinear_dof;
+            obj.contactDofs = contact_dofs_constrained;
+            obj.n_bnd = length(contact_dofs_constrained);
         end
         
         function build(obj)
-            M_full = obj.Assembly.mass_matrix();
-            K_full = obj.Assembly.stiffness_matrix();
-            
-            Mc = obj.Assembly.constrain_matrix(M_full);
-            Kc = obj.Assembly.constrain_matrix(K_full);
+            Mc = obj.Structure.AssemblyObj.constrain_matrix(obj.Structure.M);
+            Kc = obj.Structure.AssemblyObj.constrain_matrix(obj.Structure.K);
             n_dofs_c = size(Kc, 1);
             
-            unit_full = zeros(size(K_full, 1), 1);
-            unit_full(obj.nl_dof) = 1;
-            unit_c = obj.Assembly.constrain_vector(unit_full);
-            nl_dof_c = find(unit_c);
+            fprintf('\n--- Building Massless CB ROM Base ---\n');
+            
+            % Partizionamento
+            nl_dof_c = obj.contactDofs;
             inner_idx_c = setdiff(1:n_dofs_c, nl_dof_c);
             
             K_ii = Kc(inner_idx_c, inner_idx_c);
@@ -29,7 +27,7 @@ classdef MasslessCBBuilder < handle
             M_ii = Mc(inner_idx_c, inner_idx_c);
             M_ib = Mc(inner_idx_c, nl_dof_c);
             
-            % 1. Fixed-interface modes (Standard CB)
+            % 1. Fixed-interface modes
             m = obj.numModes;
             [Phi_i, D] = eigs(K_ii, M_ii, m, 'smallestabs');
             [~, sort_idx] = sort(diag(D));
@@ -39,49 +37,51 @@ classdef MasslessCBBuilder < handle
                 Phi_i(:,i) = Phi_i(:,i) / sqrt(Phi_i(:,i)' * M_ii * Phi_i(:,i));
             end
             
-            % 2. Static modes (Standard CB)
+            % 2. Static modes (Multi-Vettore per l'intera parete)
             Psi_c = - (K_ii \ full(K_ib));
             
-            % 3. Calculation of alpha to nullify M_bi (Inertial Decoupling)
-            % alpha = Phi^T * (M_ib + M_ii * Psi) 
+            % 3. Disaccoppiamento inerziale (alpha)
             alpha = Phi_i' * (full(M_ib) + M_ii * Psi_c);
             
-            % ... [rest of the existing code] ...
+            % 4. Creazione Matrice di Proiezione
+            P_alpha = zeros(n_dofs_c, obj.n_bnd + m);
+            P_alpha(nl_dof_c, 1:obj.n_bnd) = eye(obj.n_bnd);
+            P_alpha(inner_idx_c, 1:obj.n_bnd) = Psi_c - Phi_i * alpha; 
+            P_alpha(inner_idx_c, obj.n_bnd+1:end) = Phi_i;
             
-            % 4. New Projection Matrix (Component Modes)
-            P_alpha = zeros(n_dofs_c, 1 + m);
-            P_alpha(nl_dof_c, 1) = 1;
-            P_alpha(inner_idx_c, 1) = Psi_c - Phi_i * alpha; 
-            P_alpha(inner_idx_c, 2:end) = Phi_i;
+            obj.Pc = P_alpha;
+            obj.P = obj.Structure.AssemblyObj.unconstrain_vector(P_alpha);
             
-            obj.P = obj.Assembly.unconstrain_vector(P_alpha);
-            
-            % 5. Final projection of reduced matrices
-            K_complete = P_alpha' * Kc * P_alpha;
+            % 5. Proiezione delle matrici ridotte
+            obj.K_r = P_alpha' * Kc * P_alpha;
             M_complete = P_alpha' * Mc * P_alpha;
             
-            % Assignment and elimination of boundary inertia (M_bb = 0)
-            obj.K_r = K_complete;
+            % 6. AZZERAMENTO del blocco di massa all'interfaccia (M_bb = 0)
             obj.M_r = M_complete;
-            obj.M_r(1,1) = 0; % Replacement of the boundary mass block
-            % Save alpha in the object
-            obj.alpha = alpha;
+            obj.M_r(1:obj.n_bnd, 1:obj.n_bnd) = 0; 
             
+            obj.alpha = alpha;
+            fprintf('Base costruita: %d Physical DOFs + %d Modal DOFs (Massless Boundary)\n', obj.n_bnd, obj.numModes);
         end
         
-        function display_frequencies(obj)
-            omega2 = diag(obj.K_r(2:end, 2:end));
-            omega = sqrt(omega2);
-            f_hz = omega / (2 * pi);
-            
-            fprintf('\n=============================================================\n');
-            fprintf('   ROM NATURAL FREQUENCIES (Fixed-Interface Modes)   \n');
-            fprintf('=============================================================\n');
-            for idx = 1:length(f_hz)
-                fprintf('   Mode %2d   |   Angular Frequency: %10.3f rad/s   |   Frequency: %10.3f Hz\n', ...
-                    idx, omega(idx), f_hz(idx));
+        function [Mr, Kr, Cr] = get_reduced_matrices(obj)
+            if isempty(obj.Pc)
+                error('Matrice P vuota. Chiama build() prima.');
             end
-            fprintf('=============================================================\n\n');
+            Mr = obj.M_r;
+            Kr = obj.K_r;
+            
+            Cc = obj.Structure.AssemblyObj.constrain_matrix(obj.Structure.C);
+            if isscalar(Cc) && Cc == 0
+                Cr = sparse(size(Mr,1), size(Mr,2));
+            else
+                Cr = obj.Pc' * Cc * obj.Pc;
+            end
+            
+            % Simmetrizzazione
+            Mr = (Mr + Mr') / 2;
+            Kr = (Kr + Kr') / 2;
+            Cr = (Cr + Cr') / 2;
         end
     end
 end
