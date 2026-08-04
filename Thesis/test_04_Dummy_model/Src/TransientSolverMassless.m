@@ -1,57 +1,62 @@
 classdef TransientSolverMassless < handle
-    % Integratore semi-esplicito (leapfrog/Verlet) per modelli a boundary
-    % massless con contatto unilaterale FRICTIONLESS set-valued.
+    % TRANSIENTSOLVERMASSLESS Semi-explicit integrator for massless-boundary
+    % models with frictionless set-valued unilateral contact.
     %
-    % Riferimento: Monjaraz Tec et al., "A massless boundary component mode
-    % synthesis method for elastodynamic contact problems", Comput. Struct. 260 (2022).
-    % Cap. 4 (time stepping), Cap. 6 (algoritmo frictionless), App. C (aug. Lagrangian).
+    % Reference: Monjaraz Tec et al., "A massless boundary component mode
+    % synthesis method for elastodynamic contact problems", Comput. Struct. 260
+    % (2022). Ch. 4 (time stepping), Ch. 6 (frictionless algorithm),
+    % App. C (augmented Lagrangian).
     %
-    % Struttura del modello richiesta (MacNeal o massless CB):
-    %   coordinate q = [q_b ; eta],  q_b = boundary (n_bnd),  eta = modali (m)
-    %   M = [0 0 ; 0 I]        (massa NULLA al boundary)
+    % Required model structure (MacNeal or massless CB):
+    %   coordinates q = [q_b ; eta],  q_b = boundary (n_bnd), eta = modal (m)
+    %   M = [0 0 ; 0 I]        (ZERO mass at the boundary)
     %   K = [K_bb K_be ; K_eb K_ee]
-    %   C = [0 0 ; 0 D_ee]     (nessun damping al boundary)
+    %   C = [0 0 ; 0 D_ee]     (no damping at the boundary)
     %
-    % Equazioni risolte:
-    %   K_bb q_b + K_be eta - W lambda = f_b(t)             (statica, al boundary)
-    %   eta_dd + D_ee eta_d + K_ee eta + K_eb q_b = f_e(t)  (dinamica, interna)
+    % Equations solved:
+    %   K_bb q_b + K_be eta - W lambda = f_b(t)             (static, boundary)
+    %   eta_dd + D_ee eta_d + K_ee eta + K_eb q_b = f_e(t)  (dynamic, interior)
     %   g = g0 + W' q_b ,   0 <= g  _|_  lambda >= 0
     %
-    % Convenzione gap: per muro a destra, con q_b positivo verso il muro:
+    % Gap convention: for a wall on the right, with q_b positive towards it,
     %   W = -I ,  g0 = gap_wall   =>   g = gap_wall - q_b
+    % With signed gaps s the caller passes W = -diag(sign(s)) and g0 = |s|.
+    %
+    % The integrator advances on a FIXED step dt and returns its own uniform
+    % time grid; it has no equivalent of the 'OutputTimes' option of ode15s.
 
     properties
-        % --- matrici ridotte ---
+        % --- Reduced matrices ---
         Kbb, Kbe, Kee, Dee
         n_bnd, n_mod
 
-        % --- contatto ---
-        W          % [n_bnd x n_c] matrice direzioni di contatto
-        g0         % [n_c x 1] gap iniziale
+        % --- Contact ---
+        W          % [n_bnd x n_c] contact direction matrix
+        g0         % [n_c x 1] initial gaps
         n_c
 
-        % --- precomputazioni ---
-        Kbb_fact   % fattorizzazione Cholesky di K_bb
-        G_full     % W' * inv(K_bb) * W   [n_c x n_c]  (matrice di Delassus)
+        % --- Precomputed quantities ---
+        Kbb_fact   % Cholesky decomposition of K_bb
+        G_full     % W' * inv(K_bb) * W   [n_c x n_c]  (Delassus matrix)
         Ainv       % inv( (1/dt)*I + 0.5*Dee )
         Bmat       % (1/dt)*I - 0.5*Dee
 
-        % --- parametri augmented Lagrangian ---
-        eps_AL              % passo di rilassamento
+        % --- Augmented Lagrangian parameters ---
+        eps_AL              % Relaxation step
         max_iter_AL = 1000
-        tol_AL      = 1e-8  % RELATIVA a ||c||_inf (residuo KKT normalizzato)
+        tol_AL      = 1e-8  % RELATIVE to ||c||_inf (normalized KKT residual)
 
-        % --- diagnostica ---
+        % --- Diagnostics ---
         stats
         warned_AL = false
     end
 
     methods
         function obj = TransientSolverMassless(Mr, Kr, Cr, n_bnd, W, g0)
-            % Mr, Kr, Cr : matrici ridotte del ROM massless
-            % n_bnd      : numero di DOF di boundary (primi n_bnd della base)
-            % W          : [n_bnd x n_c] direzioni di contatto
-            % g0         : [n_c x 1] gap iniziali
+            % Mr, Kr, Cr : reduced matrices of the massless ROM
+            % n_bnd      : number of boundary DOFs (first n_bnd of the basis)
+            % W          : [n_bnd x n_c] contact directions
+            % g0         : [n_c x 1] initial gaps
 
             n_tot = size(Kr, 1);
             obj.n_bnd = n_bnd;
@@ -60,11 +65,11 @@ classdef TransientSolverMassless < handle
             ib = 1:n_bnd;
             ie = n_bnd+1 : n_tot;
 
-            % ---------- validazione della struttura massless ----------
+            % ---------- validate the massless structure ----------
             if norm(Mr(ib, :), 'fro') > 1e-10 * (norm(Mr, 'fro') + eps)
                 error('TSM:NotMassless', ...
-                    ['La matrice di massa ha termini non nulli sulle righe di boundary ' ...
-                     '(||M(bnd,:)|| = %.3e). Il modello NON e'' massless.'], ...
+                    ['The mass matrix has non-zero terms on the boundary rows ' ...
+                     '(||M(bnd,:)|| = %.3e). The model is NOT massless.'], ...
                      norm(Mr(ib,:), 'fro'));
             end
 
@@ -72,17 +77,17 @@ classdef TransientSolverMassless < handle
             devI = norm(Mee - eye(obj.n_mod), 'fro');
             if devI > 1e-8 * obj.n_mod
                 warning('TSM:MassNotIdentity', ...
-                    ['M(inn,inn) non e'' l''identita'' (dev = %.3e). Lo schema assume ' ...
-                     'modi normalizzati in massa.'], devI);
+                    ['M(inn,inn) is not the identity (dev = %.3e). The scheme assumes ' ...
+                     'mass-normalized modes.'], devI);
             end
 
             if norm(Cr(ib, :), 'fro') > 1e-10 * (norm(Cr, 'fro') + eps)
                 warning('TSM:BoundaryDamping', ...
-                    ['La matrice di damping ha termini al boundary: verranno IGNORATI ' ...
-                     '(la formulazione massless non li prevede).']);
+                    ['The damping matrix has boundary terms: they will be IGNORED ' ...
+                     '(the massless formulation does not account for them).']);
             end
 
-            % ---------- partizioni ----------
+            % ---------- partitions ----------
             obj.Kbb = full(Kr(ib, ib));
             obj.Kbe = full(Kr(ib, ie));
             obj.Kee = full(Kr(ie, ie));
@@ -93,20 +98,20 @@ classdef TransientSolverMassless < handle
             obj.W   = W;
             obj.g0  = g0(:);
             obj.n_c = size(W, 2);
-            assert(size(W,1) == n_bnd,      'W deve avere n_bnd righe.');
-            assert(numel(obj.g0) == obj.n_c,'g0 deve avere n_c elementi.');
+            assert(size(W,1) == n_bnd,       'W must have n_bnd rows.');
+            assert(numel(obj.g0) == obj.n_c, 'g0 must have n_c elements.');
 
-            % ---------- precomputazioni ----------
+            % ---------- precomputations ----------
             obj.Kbb_fact = decomposition(obj.Kbb, 'chol');
 
             Kbb_inv_W  = obj.Kbb_fact \ obj.W;        % inv(Kbb)*W
-            obj.G_full = obj.W' * Kbb_inv_W;          % matrice di Delassus
+            obj.G_full = obj.W' * Kbb_inv_W;          % Delassus matrix
             obj.G_full = (obj.G_full + obj.G_full') / 2;
 
             % ---------- eps_AL ----------
-            % Jacobi proiettato converge per  0 < eps < 2/lambda_max(G).
-            % Basarsi sullo SPETTRO di G (non sulla sola diagonale) e' robusto
-            % anche quando K_r e' mal condizionata.
+            % Projected Jacobi converges for 0 < eps < 2/lambda_max(G).
+            % Basing it on the SPECTRUM of G, rather than on its diagonal
+            % alone, stays robust even when K_r is ill-conditioned.
             if obj.n_c == 1
                 lam_max = obj.G_full;
             else
@@ -123,14 +128,15 @@ classdef TransientSolverMassless < handle
 
         % =================================================================
         function dt_crit = critical_timestep(obj)
-            % Limite di stabilita' dello schema esplicito sulle coord. interne.
-            % NOTA: il boundary NON contribuisce (risolto quasi-staticamente).
+            % CRITICAL_TIMESTEP Stability limit of the explicit scheme on the
+            % interior coordinates.
             %
-            % Il condensamento statico del boundary modifica la rigidezza vista
-            % dai modi:
-            %   contatto APERTO : K_eff = Kee - Keb*inv(Kbb)*Kbe   (bordo libero)
-            %   contatto CHIUSO : K_eff = Kee                      (bordo bloccato)
-            % Si prende il caso piu' restrittivo.
+            % The boundary does NOT contribute: it is solved quasi-statically.
+            % Static condensation of the boundary changes the stiffness seen
+            % by the modes:
+            %   contact OPEN   : K_eff = Kee - Keb*inv(Kbb)*Kbe   (free edge)
+            %   contact CLOSED : K_eff = Kee                      (locked edge)
+            % The more restrictive of the two is used.
 
             H = obj.Kbb_fact \ obj.Kbe;                 % inv(Kbb)*Kbe
             Keff_open = obj.Kee - obj.Kbe' * H;
@@ -143,9 +149,11 @@ classdef TransientSolverMassless < handle
 
         % =================================================================
         function [t, q, lambda_hist, info] = solve(obj, tmax, dt, q0_full, qd0_full, F_handle)
-            % q0_full, qd0_full : CI sull'intero vettore ridotto [q_b ; eta].
-            %                     La parte di boundary di qd0 e' ignorata.
-            % F_handle          : @(t) -> forza ridotta [n_bnd+n_mod x 1]
+            % SOLVE Integrate the massless model with set-valued contact.
+            %   q0_full, qd0_full : initial conditions on the whole reduced
+            %                       vector [q_b ; eta]. The boundary part of
+            %                       qd0 is ignored.
+            %   F_handle          : @(t) -> reduced force [n_bnd+n_mod x 1]
 
             nb = obj.n_bnd;  nm = obj.n_mod;
             n_steps = round(tmax/dt);
@@ -153,17 +161,17 @@ classdef TransientSolverMassless < handle
 
             obj.warned_AL = false;
 
-            % ---------- check stabilita' ----------
+            % ---------- stability check ----------
             dtc = obj.critical_timestep();
             fprintf('  [massless] dt = %.3e | dt_crit ~ %.3e | ratio = %.3f\n', ...
                 dt, dtc, dt/dtc);
             if dt > dtc
                 warning('TSM:Unstable', ...
-                    ['dt = %.3e SUPERA il limite di stabilita'' stimato %.3e. ' ...
-                     'Lo schema divergera''. Ridurre dt o numModes.'], dt, dtc);
+                    ['dt = %.3e EXCEEDS the estimated stability limit %.3e. ' ...
+                     'The scheme will diverge. Reduce dt or numModes.'], dt, dtc);
             end
 
-            % ---------- operatori dell'update esplicito ----------
+            % ---------- operators of the explicit update ----------
             Im = eye(nm);
             A  = (1/dt)*Im + 0.5*obj.Dee;
             obj.Bmat = (1/dt)*Im - 0.5*obj.Dee;
@@ -176,31 +184,33 @@ classdef TransientSolverMassless < handle
             iters_AL    = zeros(1, n_steps+1);
             kkt_rel     = zeros(1, n_steps+1);
 
-            % ---------- inizializzazione ----------
-            % Leapfrog: eta sulla griglia intera, eta_dot sulla semi-intera.
-            % Approssimazione eta_dot^{1/2} = eta_dot(t0)  (Sez. 4.4 del paper).
+            % ---------- initialization ----------
+            % Leapfrog: eta on the integer grid, eta_dot on the half grid.
+            % Approximation eta_dot^{1/2} = eta_dot(t0), Sec. 4.4 of the paper.
             eta  = q0_full(nb+1:end);
             etad = qd0_full(nb+1:end);         % = eta_dot^{k-1/2}
             lam  = zeros(obj.n_c, 1);
-% ---------- DEBUG: ampiezza della forzante proiettata ----------
-            Fp = F_handle(5e-7);              % ~ meta' dello shock (t_shock = 1e-6)
+
+            % Diagnostic: magnitude of the projected forcing at mid-shock
+            Fp = F_handle(5e-7);
             fprintf('  [debug] ||f_b|| = %.3e | ||f_e|| = %.3e\n', ...
                 norm(Fp(1:nb)), norm(Fp(nb+1:end)));
+
             for k = 0:n_steps
                 tk = k*dt;
                 Fk = F_handle(tk);
                 fb = Fk(1:nb);
                 fe = Fk(nb+1:end);
 
-                % ---------- 1. predizione del gap (lambda = 0) ----------
+                % ---------- 1. gap prediction (lambda = 0) ----------
                 rhs    = fb - obj.Kbe * eta;
                 qb_pre = obj.Kbb_fact \ rhs;              % inv(Kbb)*(fb - Kbe*eta)
-                g_pre  = obj.g0 + obj.W' * qb_pre;        % = c del paper
+                g_pre  = obj.g0 + obj.W' * qb_pre;        % = c in the paper
 
-                Ia = find(g_pre <= 0);                    % set attivo
+                Ia = find(g_pre <= 0);                    % active set
                 n_active(k+1) = numel(Ia);
 
-                % ---------- 2. soluzione del contatto ----------
+                % ---------- 2. contact solution ----------
                 if isempty(Ia)
                     lam = zeros(obj.n_c, 1);
                     qb  = qb_pre;
@@ -229,25 +239,25 @@ classdef TransientSolverMassless < handle
 
                 if ~all(isfinite(qb)) || ~all(isfinite(eta))
                     error('TSM:Diverged', ...
-                        'Soluzione divergente al passo %d (t = %.3e s).', k, tk);
+                        'Solution diverged at step %d (t = %.3e s).', k, tk);
                 end
 
                 if k == n_steps, break; end
 
-                % ---------- 3. update esplicito coordinate interne ----------
+                % ---------- 3. explicit update of the interior coordinates ----------
                 % A*etad^{k+1/2} = fe - Kee*eta - Keb*qb + B*etad^{k-1/2}
                 rhs_e = fe - obj.Kee * eta - obj.Kbe' * qb + obj.Bmat * etad;
                 etad  = obj.Ainv * rhs_e;
 
-                % ---------- 4. update posizione ----------
+                % ---------- 4. position update ----------
                 eta = eta + etad * dt;
             end
 
-            % ---------- diagnostica ----------
+            % ---------- diagnostics ----------
             act = n_active > 0;
-            % ---------- DEBUG: ampiezze della risposta ----------
             fprintf('  [debug] max|q_b| = %.3e | max|eta| = %.3e\n', ...
                 max(abs(q(1:nb,:)), [], 'all'), max(abs(q(nb+1:end,:)), [], 'all'));
+
             obj.stats = struct( ...
                 'n_active', n_active, ...
                 'iters_AL', iters_AL, ...
@@ -256,22 +266,23 @@ classdef TransientSolverMassless < handle
                 'eps_AL',   obj.eps_AL);
             info = obj.stats;
 
-            fprintf('  [massless] passi con contatto attivo: %d/%d (%.1f%%)\n', ...
+            fprintf('  [massless] steps with active contact: %d/%d (%.1f%%)\n', ...
                 nnz(act), n_steps+1, 100*nnz(act)/(n_steps+1));
             if any(act)
-                fprintf('  [massless] iter AL: media %.1f | max %d\n', ...
+                fprintf('  [massless] AL iterations: mean %.1f | max %d\n', ...
                     mean(iters_AL(act)), max(iters_AL));
-                fprintf('  [massless] residuo KKT rel: max %.3e (tol %.1e)\n', ...
+                fprintf('  [massless] relative KKT residual: max %.3e (tol %.1e)\n', ...
                     max(kkt_rel), obj.tol_AL);
-                fprintf('  [massless] contatti attivi: max %d / %d\n', ...
+                fprintf('  [massless] active contacts: max %d / %d\n', ...
                     max(n_active), obj.n_c);
             end
-            fprintf('  [massless] penetrazione max: %.3e  (gap = %.3e)\n', ...
+            fprintf('  [massless] max penetration: %.3e  (gap = %.3e)\n', ...
                 obj.max_penetration(q), max(obj.g0));
         end
 
         % =================================================================
         function pen = max_penetration(obj, q)
+            % MAX_PENETRATION Largest constraint violation over the history.
             qb = q(1:obj.n_bnd, :);
             g  = obj.g0 + obj.W' * qb;
             pen = max(0, -min(g(:)));
@@ -281,23 +292,23 @@ classdef TransientSolverMassless < handle
     % =====================================================================
     methods (Access = private)
         function [lam, nit, res_rel] = solve_lcp(obj, G, c, lam0)
-            % Risolve  0 <= (G*lam + c)  _|_  lam >= 0
-            % via augmented Lagrangian + Jacobi proiettato (App. C):
+            % SOLVE_LCP Solve  0 <= (G*lam + c)  _|_  lam >= 0
+            % via augmented Lagrangian and projected Jacobi (App. C):
             %   lam <- proj_{R+}( lam - eps_AL*(G*lam + c) )
             %
-            % Arresto sul RESIDUO KKT NORMALIZZATO:
+            % Stopping on the NORMALIZED KKT RESIDUAL:
             %   r = || min(lam, G*lam + c) ||_inf / ||c||_inf
-            % Un criterio sull'incremento di lam e' fragile: vicino alla
-            % soluzione l'incremento e' dominato dal round-off e la soglia
-            % assoluta non viene mai raggiunta.
+            % A criterion on the increment of lam would be fragile: near the
+            % solution the increment is dominated by round-off and an absolute
+            % threshold is never reached.
 
             lam = max(lam0, 0);
             e   = obj.eps_AL;
 
-            % scala di riferimento = grandezza del termine noto (gap predetto)
+            % Reference scale = magnitude of the right-hand side (predicted gap)
             scale = norm(c, inf);
             if scale < 1e-16
-                scale = 1;      % floor: evita divisione per ~0
+                scale = 1;      % floor: avoid dividing by ~0
             end
 
             res_rel = Inf;
@@ -313,12 +324,12 @@ classdef TransientSolverMassless < handle
                 lam = max(lam - e*r, 0);
             end
 
-            % Non convergenza vera: warning UNA SOLA VOLTA per simulazione
+            % Genuine non-convergence: warn ONCE per simulation
             if ~obj.warned_AL
                 warning('TSM:ALNoConv', ...
-                    ['Aug. Lagrangian: %d iter senza convergenza. ' ...
-                     'Residuo KKT relativo = %.3e (tol = %.1e). ' ...
-                     'Warning emesso una sola volta per simulazione.'], ...
+                    ['Augmented Lagrangian: %d iterations without convergence. ' ...
+                     'Relative KKT residual = %.3e (tol = %.1e). ' ...
+                     'This warning is issued only once per simulation.'], ...
                     obj.max_iter_AL, res_rel, obj.tol_AL);
                 obj.warned_AL = true;
             end

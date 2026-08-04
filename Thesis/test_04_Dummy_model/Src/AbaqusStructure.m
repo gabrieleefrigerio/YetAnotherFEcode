@@ -1,57 +1,57 @@
 classdef AbaqusStructure < handle
-    % ABAQUSSTRUCTURE Importa una mesh Abaqus (.inp) e costruisce il modello YAFEC.
+    % ABAQUSSTRUCTURE Import an Abaqus mesh (.inp) and build the YAFEC model.
     %
-    % Gestisce un numero QUALSIASI di interfacce di contatto. I node set del
-    % file .inp il cui nome inizia per 'ContactInterface' vengono scoperti
-    % automaticamente e resi accessibili tramite un'etichetta:
+    % Handles ANY number of contact interfaces. Node sets whose name starts
+    % with 'ContactInterface' are discovered automatically and exposed through
+    % a label:
     %
-    %   *Nset, nset=ContactInterface      ->  etichetta 'C'   (interfaccia unica)
-    %   *Nset, nset=ContactInterface_T    ->  etichetta 'T'
-    %   *Nset, nset=ContactInterface_LEFT ->  etichetta 'LEFT'
+    %   *Nset, nset=ContactInterface      ->  label 'C'   (single interface)
+    %   *Nset, nset=ContactInterface_T    ->  label 'T'
+    %   *Nset, nset=ContactInterface_LEFT ->  label 'LEFT'
     %
-    % Lo stesso codice gira quindi sia sul modello a una faccia di contatto
-    % (DummyStructureAbaqus.inp) sia su quello a quattro (..._V4.inp): cambia
-    % solo la lista di etichette trovate, non la logica del main.
+    % The same code therefore runs both on the four-interface model
+    % (DummyStructureAbaqus_V4.inp) and on a single-interface one: only the
+    % list of discovered labels changes, not the logic of the main.
     %
-    % Supporta la forma compatta '*Nset, ..., generate', dove la riga dati e'
-    % una terna (primo, ultimo, incremento) e va espansa. Leggerne i tre numeri
-    % come tre ID di nodo produce set di contatto sbagliati.
+    % The compact form '*Nset, ..., generate' is supported, where the data
+    % line is a triple (first, last, increment) that must be expanded. Reading
+    % those three numbers as three node IDs yields wrong contact sets.
     %
-    % API contatto:
-    %   obj.contact_labels           etichette trovate nel file, ordinate
-    %   obj.get_contact_nodes(lbl)   ID dei nodi dell'interfaccia
-    %   obj.get_contact_dofs(lbl, d) GdL vincolati, d = 1 (X) oppure 2 (Y)
-    %   obj.describe_interfaces()    riepilogo con le coordinate dei nodi
-    %   obj.plot_contact_interfaces() controllo visivo dei set letti
+    % Contact API:
+    %   obj.contact_labels            labels found in the file, sorted
+    %   obj.get_contact_nodes(lbl)    node IDs of the interface
+    %   obj.get_contact_dofs(lbl, d)  constrained DOFs, d = 1 (X) or 2 (Y)
+    %   obj.describe_interfaces()     summary with the node coordinates
+    %   obj.plot_contact_interfaces() visual check of the sets that were read
 
     properties
-        % --- File di input ---
+        % --- Input file ---
         filename = '';
 
-        % --- Materiale e spessore ---
-        thickness = 10e-6;     % Spessore fuori piano [m]
+        % --- Material and thickness ---
+        thickness = 10e-6;     % Out-of-plane thickness [m]
         elementType = 'QUAD8';
-        E = 165e9;             % Modulo di Young [Pa]
-        rho = 2330;            % Densita' [kg/m^3]
-        nu = 0.25;             % Coefficiente di Poisson
+        E = 165e9;             % Young's modulus [Pa]
+        rho = 2330;            % Density [kg/m^3]
+        nu = 0.25;             % Poisson's ratio
 
         % --- Mesh ---
         nodes
         elements
         bc_nodes
 
-        % --- Interfacce di contatto (numero arbitrario) ---
-        contact_sets = struct();   % un campo per etichetta -> vettore di nodi
-        contact_labels = {};       % elenco ordinato delle etichette trovate
+        % --- Contact interfaces (arbitrary number) ---
+        contact_sets = struct();   % one field per label -> node vector
+        contact_labels = {};       % sorted list of the labels found
 
-        % --- Oggetti YAFEC ---
+        % --- YAFEC objects ---
         MeshObj
         AssemblyObj
         K
         M
         C
 
-        % --- Risultati dell'analisi ---
+        % --- Analysis results ---
         frequencies
         mode_shapes
     end
@@ -67,7 +67,7 @@ classdef AbaqusStructure < handle
 
         function build(obj)
             if isempty(obj.filename)
-                error('Specificare filename prima di chiamare build().');
+                error('AbaqusStructure:NoFile', 'Set filename before calling build().');
             end
             obj.import_mesh(obj.filename);
             obj.setup_yafec_model();
@@ -75,23 +75,25 @@ classdef AbaqusStructure < handle
 
         % =================================================================
         function import_mesh(obj, filename)
+            % IMPORT_MESH Read nodes, elements, boundary and contact node sets.
             meshinfo = abqmesh(filename);
 
             obj.nodes = meshinfo.nodes;
             obj.elements = meshinfo.elem{1};
 
-            % Reset (necessario se build() viene richiamato piu' volte)
+            % Reset, needed when build() is called more than once
             obj.bc_nodes = [];
             obj.contact_sets = struct();
             obj.contact_labels = {};
 
             fid = fopen(filename, 'r');
             if fid == -1
-                error('Impossibile aprire il file %s per la lettura dei Set.', filename);
+                error('AbaqusStructure:CannotOpen', ...
+                    'Cannot open file %s to read the node sets.', filename);
             end
             cleaner = onCleanup(@() fclose(fid));
 
-            current_label = '';      % etichetta contatto del blocco corrente
+            current_label = '';      % contact label of the current block
             current_is_bc = false;
             current_gen   = false;
 
@@ -105,7 +107,7 @@ classdef AbaqusStructure < handle
                     [current_label, current_is_bc, current_gen] = obj.parse_nset_header(line);
 
                 elseif startsWith(line, '*')
-                    % Qualunque altra keyword chiude il blocco corrente
+                    % Any other keyword closes the current block
                     current_label = '';
                     current_is_bc = false;
                     current_gen   = false;
@@ -123,7 +125,7 @@ classdef AbaqusStructure < handle
                 end
             end
 
-            % Rimozione duplicati
+            % Remove duplicates
             if ~isempty(obj.bc_nodes)
                 obj.bc_nodes = unique(obj.bc_nodes);
             end
@@ -133,26 +135,27 @@ classdef AbaqusStructure < handle
             end
             obj.contact_labels = sort(obj.contact_labels);
 
-            % --- Riepilogo ---
-            fprintf('--- Mesh importata da %s ---\n', filename);
-            fprintf(' Nodi totali: %d\n', size(obj.nodes, 1));
+            % --- Summary ---
+            fprintf('--- Mesh imported from %s ---\n', filename);
+            fprintf(' Total nodes: %d\n', size(obj.nodes, 1));
             if ~isempty(obj.bc_nodes)
-                fprintf(' Nodi vincolati: %d\n', numel(obj.bc_nodes));
+                fprintf(' Fixed nodes: %d\n', numel(obj.bc_nodes));
             end
             if isempty(obj.contact_labels)
-                fprintf(' Nessuna interfaccia di contatto trovata.\n');
+                fprintf(' No contact interface found.\n');
             else
-                fprintf(' Interfacce di contatto: %d (%s)\n', ...
+                fprintf(' Contact interfaces: %d (%s)\n', ...
                     numel(obj.contact_labels), strjoin(obj.contact_labels, ', '));
                 for i = 1:numel(obj.contact_labels)
                     lbl = obj.contact_labels{i};
-                    fprintf('   %-6s -> %d nodi\n', lbl, numel(obj.contact_sets.(lbl)));
+                    fprintf('   %-6s -> %d nodes\n', lbl, numel(obj.contact_sets.(lbl)));
                 end
             end
         end
 
         % =================================================================
         function setup_yafec_model(obj)
+            % SETUP_YAFEC_MODEL Build the mesh, assembly and system matrices.
             myMaterial = KirchoffMaterial();
             set(myMaterial, 'YOUNGS_MODULUS', obj.E, 'DENSITY', obj.rho, 'POISSONS_RATIO', obj.nu);
             myMaterial.PLANE_STRESS = true;
@@ -162,7 +165,8 @@ classdef AbaqusStructure < handle
                 case 'TRI6',  myConstructor = @()Tri6Element(obj.thickness, myMaterial);
                 case 'QUAD4', myConstructor = @()Quad4Element(obj.thickness, myMaterial);
                 case 'QUAD8', myConstructor = @()Quad8Element(obj.thickness, myMaterial);
-                otherwise, error('Tipo di elemento non supportato: %s', obj.elementType);
+                otherwise, error('AbaqusStructure:BadElement', ...
+                        'Unsupported element type: %s', obj.elementType);
             end
 
             obj.MeshObj = Mesh(obj.nodes);
@@ -182,30 +186,33 @@ classdef AbaqusStructure < handle
         end
 
         % =================================================================
-        %  INTERFACCE DI CONTATTO
+        %  CONTACT INTERFACES
         % =================================================================
         function n = n_interfaces(obj)
+            % N_INTERFACES Number of contact interfaces found in the file.
             n = numel(obj.contact_labels);
         end
 
         function nodes_out = get_contact_nodes(obj, label)
-            % GET_CONTACT_NODES ID dei nodi dell'interfaccia 'label'.
+            % GET_CONTACT_NODES Node IDs of interface 'label'.
             label = obj.check_label(label);
             nodes_out = obj.contact_sets.(label);
         end
 
         function dofs_constrained = get_contact_dofs(obj, label, dir)
-            % GET_CONTACT_DOFS GdL vincolati dell'interfaccia 'label'.
-            %   label : etichetta dell'interfaccia ('T', 'R', 'C', ...)
-            %   dir   : 1 per la direzione X, 2 per la Y
+            % GET_CONTACT_DOFS Constrained DOFs of interface 'label'.
+            %   label : interface label ('T', 'R', 'C', ...)
+            %   dir   : 1 for the X direction, 2 for Y
             %
-            % Restituisce [] se il set esiste ma tutti i suoi GdL sono bloccati
-            % dalle condizioni al contorno.
+            % Returns [] if the set exists but all of its DOFs are locked by
+            % the essential boundary conditions.
             if nargin < 3
-                error('Servono etichetta e direzione: get_contact_dofs(label, dir).');
+                error('AbaqusStructure:MissingDir', ...
+                    'Both label and direction are required: get_contact_dofs(label, dir).');
             end
             if ~ismember(dir, [1 2])
-                error('dir deve valere 1 (X) oppure 2 (Y), non %g.', dir);
+                error('AbaqusStructure:BadDir', ...
+                    'dir must be 1 (X) or 2 (Y), not %g.', dir);
             end
 
             target_nodes = obj.get_contact_nodes(label);
@@ -221,15 +228,15 @@ classdef AbaqusStructure < handle
         end
 
         function describe_interfaces(obj)
-            % DESCRIBE_INTERFACES Riepilogo geometrico delle interfacce trovate.
-            % Serve ad accorgersi subito di un node set letto male: i nodi di una
-            % faccia devono essere allineati, cioe' avere X oppure Y quasi costante.
+            % DESCRIBE_INTERFACES Geometric summary of the interfaces found.
+            % Meant to catch a misread node set immediately: the nodes of a
+            % face must be aligned, i.e. have a nearly constant X or Y.
             if isempty(obj.contact_labels)
-                fprintf('Nessuna interfaccia di contatto.\n');
+                fprintf('No contact interface.\n');
                 return;
             end
-            fprintf('\n--- Interfacce di contatto ---\n');
-            fprintf('%-6s %6s   %-25s %-25s\n', 'Label', 'Nodi', 'X range [m]', 'Y range [m]');
+            fprintf('\n--- Contact interfaces ---\n');
+            fprintf('%-6s %6s   %-25s %-25s\n', 'Label', 'Nodes', 'X range [m]', 'Y range [m]');
             for i = 1:numel(obj.contact_labels)
                 lbl = obj.contact_labels{i};
                 n = obj.contact_sets.(lbl);
@@ -243,11 +250,13 @@ classdef AbaqusStructure < handle
         end
 
         % =================================================================
-        %  ANALISI
+        %  ANALYSIS
         % =================================================================
         function compute_eigenmodes(obj, n_modes)
+            % COMPUTE_EIGENMODES Free-interface normal modes of the model.
             if isempty(obj.K) || isempty(obj.M)
-                error('Matrici del modello assenti. Eseguire build() prima di compute_eigenmodes().');
+                error('AbaqusStructure:NoMatrices', ...
+                    'Model matrices are missing. Run build() before compute_eigenmodes().');
             end
 
             Kc = obj.AssemblyObj.constrain_matrix(obj.K);
@@ -261,17 +270,20 @@ classdef AbaqusStructure < handle
             end
 
             obj.mode_shapes = obj.AssemblyObj.unconstrain_vector(V0);
-            fprintf('--- Analisi modale completata (%d modi) ---\n', n_modes);
+            fprintf('--- Modal analysis complete (%d modes) ---\n', n_modes);
             n_show = min(n_modes, 10);
             for ii = 1:n_show
-                fprintf(' Modo %d: %.3f Hz\n', ii, obj.frequencies(ii));
+                fprintf(' Mode %d: %.3f Hz\n', ii, obj.frequencies(ii));
             end
             if n_modes > n_show
-                fprintf(' ... Modo %d: %.3f Hz\n', n_modes, obj.frequencies(n_modes));
+                fprintf(' ... Mode %d: %.3f Hz\n', n_modes, obj.frequencies(n_modes));
             end
         end
 
         function [C, alpha_ray, beta_ray] = compute_rayleigh_damping(obj, Q1, Q2)
+            % COMPUTE_RAYLEIGH_DAMPING Rayleigh damping from two quality factors.
+            % Also returns alpha and beta, which the massless ROMs use to build
+            % an equivalent diagonal modal damping.
             if isempty(obj.frequencies) || length(obj.frequencies) < 2
                 obj.compute_eigenmodes(2);
             end
@@ -286,7 +298,8 @@ classdef AbaqusStructure < handle
             beta_ray  = (2 * (zeta_2 * w2 - zeta_1 * w1)) / (w2^2 - w1^2);
 
             if isempty(obj.K) || isempty(obj.M)
-                error('Matrici K e M assenti. Eseguire build() prima.');
+                error('AbaqusStructure:NoMatrices', ...
+                    'K and M matrices are missing. Run build() first.');
             end
 
             obj.C = alpha_ray * obj.M + beta_ray * obj.K;
@@ -294,14 +307,17 @@ classdef AbaqusStructure < handle
 
             C = obj.C;
 
-            fprintf('\n--- Smorzamento di Rayleigh ---\n');
-            fprintf('Frequenze di base: f1 = %.3f Hz, f2 = %.3f Hz\n', obj.frequencies(1), obj.frequencies(2));
-            fprintf('Q1 = %g, Q2 = %g  ->  zeta_1 = %g, zeta_2 = %g\n', Q1, Q2, zeta_1, zeta_2);
+            fprintf('\n--- Rayleigh damping ---\n');
+            fprintf('Base frequencies: f1 = %.3f Hz, f2 = %.3f Hz\n', ...
+                obj.frequencies(1), obj.frequencies(2));
+            fprintf('Q1 = %g, Q2 = %g  ->  zeta_1 = %g, zeta_2 = %g\n', ...
+                Q1, Q2, zeta_1, zeta_2);
             fprintf('alpha = %e\n', alpha_ray);
             fprintf('beta  = %e\n', beta_ray);
         end
 
         function F_c = create_constrained_force_vector(obj, target_node, dof_dir)
+            % CREATE_CONSTRAINED_FORCE_VECTOR Unit load on one node and direction.
             dof_global = (target_node - 1) * obj.MeshObj.nDOFPerNode + dof_dir;
             F_full = zeros(obj.MeshObj.nDOFs, 1);
             F_full(dof_global) = 1;
@@ -309,10 +325,13 @@ classdef AbaqusStructure < handle
         end
 
         % =================================================================
-        %  PLOT
+        %  PLOTS
         % =================================================================
         function plot_undeformed(obj, varargin)
-            if isempty(obj.nodes) || isempty(obj.elements), error('Mesh non trovata.'); end
+            % PLOT_UNDEFORMED Undeformed mesh, optionally coloured by a field.
+            if isempty(obj.nodes) || isempty(obj.elements)
+                error('AbaqusStructure:NoMesh', 'Mesh not found.');
+            end
             elementPlot = obj.elements(:, obj.plot_connectivity_index());
 
             if nargin > 1 && ~isempty(varargin{1})
@@ -337,10 +356,10 @@ classdef AbaqusStructure < handle
         end
 
         function plot_contact_interfaces(obj)
-            % PLOT_CONTACT_INTERFACES Mesh con i nodi di ogni interfaccia evidenziati.
-            % Controllo visivo immediato che i node set siano stati letti bene.
+            % PLOT_CONTACT_INTERFACES Mesh with the nodes of each interface marked.
+            % Immediate visual check that the node sets were read correctly.
             if isempty(obj.contact_labels)
-                error('Nessuna interfaccia di contatto da disegnare.');
+                error('AbaqusStructure:NoInterfaces', 'No contact interface to plot.');
             end
             elementPlot = obj.elements(:, obj.plot_connectivity_index());
 
@@ -357,20 +376,23 @@ classdef AbaqusStructure < handle
                 h(i) = plot(obj.nodes(n,1), obj.nodes(n,2), ...
                     markers{mod(i-1, numel(markers))+1}, ...
                     'MarkerSize', 8, 'LineWidth', 1.5, 'LineStyle', 'none', ...
-                    'DisplayName', sprintf('%s (%d nodi)', lbl, numel(n)));
+                    'DisplayName', sprintf('%s (%d nodes)', lbl, numel(n)));
             end
             legend(h(isgraphics(h)), 'Location', 'bestoutside');
-            title('Interfacce di contatto');
+            title('Contact interfaces');
             xlabel('X [m]'); ylabel('Y [m]');
             axis equal; grid on;
         end
 
         function plot_mode(obj, mode_idx, scale_factor)
+            % PLOT_MODE Mode shape mode_idx over the undeformed mesh.
             if isempty(obj.frequencies) || isempty(obj.mode_shapes)
-                error('Nessun modo disponibile. Eseguire compute_eigenmodes() prima.');
+                error('AbaqusStructure:NoModes', ...
+                    'No mode available. Run compute_eigenmodes() first.');
             end
             if mode_idx > length(obj.frequencies)
-                error('Indice di modo oltre il numero di modi calcolati.');
+                error('AbaqusStructure:BadModeIndex', ...
+                    'Mode index beyond the number of computed modes.');
             end
             elementPlot = obj.elements(:, obj.plot_connectivity_index());
 
@@ -387,15 +409,16 @@ classdef AbaqusStructure < handle
             colormap jet;
             colorbar;
             set(findobj(gca, '-property', 'Marker'), 'Marker', 'none');
-            title(['\Phi_{' num2str(mode_idx) '} - Frequency = ' num2str(obj.frequencies(mode_idx), 4) ' Hz']);
+            title(['\Phi_{' num2str(mode_idx) '} - Frequency = ' ...
+                num2str(obj.frequencies(mode_idx), 4) ' Hz']);
             xlabel('X [m]'); ylabel('Y [m]');
             axis equal; grid on;
         end
 
         function plot_static_result(obj, U, scale_factor)
-            % PLOT_STATIC_RESULT Deformata di un'analisi statica.
-            %   U            : spostamenti (vettore vincolato o completo)
-            %   scale_factor : fattore di scala (default 1, scala reale)
+            % PLOT_STATIC_RESULT Deformed shape of a static analysis.
+            %   U            : displacements (constrained or full vector)
+            %   scale_factor : scale factor (default 1, true scale)
             if nargin < 3 || isempty(scale_factor)
                 scale_factor = 1;
             end
@@ -406,7 +429,8 @@ classdef AbaqusStructure < handle
             elseif length(U) == n_dofs_full
                 U_full = U;
             else
-                error('Dimensione del vettore degli spostamenti non compatibile.');
+                error('AbaqusStructure:BadSize', ...
+                    'Displacement vector size is not compatible with the model.');
             end
 
             elementPlot = obj.elements(:, obj.plot_connectivity_index());
@@ -429,8 +453,9 @@ classdef AbaqusStructure < handle
     % =====================================================================
     methods (Access = private)
         function [label, is_bc, is_gen] = parse_nset_header(~, line)
-            % Estrae dalla riga '*Nset, nset=NOME, ..., generate' il nome del set,
-            % se e' un set di vincolo e se usa la forma compatta 'generate'.
+            % PARSE_NSET_HEADER Extract from '*Nset, nset=NAME, ..., generate'
+            % the set name, whether it is a boundary set, and whether it uses
+            % the compact 'generate' form.
             label  = '';
             is_bc  = false;
             is_gen = ~isempty(regexpi(line, ',\s*generate\s*(,|$)', 'once'));
@@ -446,13 +471,13 @@ classdef AbaqusStructure < handle
                 return;
             end
 
-            % Qualsiasi set che inizia per 'ContactInterface' e' un'interfaccia.
+            % Any set starting with 'ContactInterface' is an interface.
             prefix = 'ContactInterface';
             if strncmpi(name, prefix, numel(prefix))
                 suffix = name(numel(prefix)+1:end);
-                suffix = regexprep(suffix, '^[_\-]', '');   % via il separatore
+                suffix = regexprep(suffix, '^[_\-]', '');   % drop the separator
                 if isempty(suffix)
-                    label = 'C';        % set unico, senza suffisso
+                    label = 'C';        % single set, no suffix
                 else
                     label = matlab.lang.makeValidName(suffix);
                 end
@@ -460,12 +485,13 @@ classdef AbaqusStructure < handle
         end
 
         function nums = expand_generate(~, raw)
-            % Espande le terne (primo, ultimo, incremento) della forma 'generate'.
+            % EXPAND_GENERATE Expand the (first, last, increment) triples of
+            % the compact 'generate' form into explicit node IDs.
             raw = raw(:).';
             if isempty(raw) || mod(numel(raw), 3) ~= 0
                 warning('AbaqusStructure:BadGenerate', ...
-                    ['Riga ''generate'' con %d valori (attesi multipli di 3): ' ...
-                     'letta senza espansione.'], numel(raw));
+                    ['''generate'' line with %d values (expected a multiple of 3): ' ...
+                     'read without expansion.'], numel(raw));
                 nums = raw(:);
                 return;
             end
@@ -481,6 +507,7 @@ classdef AbaqusStructure < handle
         end
 
         function append_contact_nodes(obj, label, nums)
+            % APPEND_CONTACT_NODES Add nodes to a contact set, creating it if new.
             if ~isfield(obj.contact_sets, label)
                 obj.contact_sets.(label) = [];
                 obj.contact_labels{end+1} = label;
@@ -489,24 +516,28 @@ classdef AbaqusStructure < handle
         end
 
         function label = check_label(obj, label)
+            % CHECK_LABEL Validate an interface label against the ones found.
             if ~ischar(label) && ~isstring(label)
-                error('L''etichetta dell''interfaccia deve essere una stringa.');
+                error('AbaqusStructure:BadLabel', ...
+                    'The interface label must be a string.');
             end
             label = char(label);
             if ~isfield(obj.contact_sets, label)
                 error('AbaqusStructure:NoSuchInterface', ...
-                    'Interfaccia ''%s'' non presente nel file. Disponibili: %s', ...
+                    'Interface ''%s'' is not present in the file. Available: %s', ...
                     label, strjoin(obj.contact_labels, ', '));
             end
         end
 
         function idx = plot_connectivity_index(obj)
+            % PLOT_CONNECTIVITY_INDEX Node ordering used to draw each element type.
             switch upper(obj.elementType)
                 case 'TRI3',  idx = 1:3;
                 case 'TRI6',  idx = [1 4 2 5 3 6];
                 case 'QUAD4', idx = 1:4;
                 case 'QUAD8', idx = [1 5 2 6 3 7 4 8];
-                otherwise, error('Tipo di elemento non supportato: %s', obj.elementType);
+                otherwise, error('AbaqusStructure:BadElement', ...
+                        'Unsupported element type: %s', obj.elementType);
             end
         end
     end

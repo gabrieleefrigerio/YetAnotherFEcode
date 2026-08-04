@@ -1,37 +1,36 @@
-# Archivio di test_04_Dummy_model
+# Archive of test_04_Dummy_model
 
-Codice non piu' in uso, conservato per riferimento. Tutto e' anche in git
-(commit `160b989`, "Snapshot pre-refactor"), quindi nulla e' andato perso.
+Code no longer in use, kept for reference. Everything is also in git
+(commit `160b989`, "Snapshot pre-refactor"), so nothing has been lost.
 
-## Perche' la cartella si chiama `+archive`
+## Why the folder is called `+archive`
 
-Il `+` la rende un **package MATLAB**, e i package sono esclusi da `genpath`.
-E' una scelta deliberata: dentro `V2_snapshot/` ci sono copie vecchie di
-`RomMC.m`, `RomMCB.m`, `RomMN.m`, `RomRubin.m` e `RomCB.m`, che hanno lo
-stesso nome dei file vivi in `Src/`. Con una cartella normale, un
-`addpath(genpath(...))` avrebbe messo entrambe le versioni sul path e quale
-delle due vince sarebbe dipeso dall'ordine del path: si sarebbe potuta usare
-per sbaglio la versione di luglio invece di quella corrente. Con il `+`
-questo non puo' succedere.
+The `+` makes it a **MATLAB package**, and packages are excluded from
+`genpath`. That is deliberate: `V2_snapshot/` contains old copies of
+`RomMC.m`, `RomMCB.m`, `RomMN.m`, `RomRubin.m` and `RomCB.m`, which have the
+same names as the live files in `Src/`. With a plain folder, an
+`addpath(genpath(...))` would put both versions on the path and which one
+wins would depend on the path order, so the July versions could silently be
+used instead of the current ones. The `+` makes that impossible.
 
-Per lo stesso motivo, **non** rinominare questa cartella in `archive` o
-`_archive` senza prima aver risolto la duplicazione.
+For the same reason, do **not** rename this folder to `archive` or
+`_archive` without first resolving the duplication.
 
-## Contenuto
+## Contents
 
-| cartella       | cosa contiene |
+| folder         | what it holds |
 |----------------|---------------|
-| `scripts/`     | main, test e script di plot superati (incluso `test_04_main_V2.m` e `test_04_postProcessing_V2.m`, confluiti nei main unificati) |
-| `Src/`         | classi superate: `AbaqusStructure_V2`, `TransientSolverOde_V2`, i solutori Newmark/Leapfrog, i `residual_*`, script scratch |
-| `meshes/`      | mesh Abaqus non piu' usate (`.inp` V1, V2, V3). Il modello corrente e' `Src/DummyStructureAbaqus_V4.inp` |
-| `Old/`         | cartella `Old/` preesistente, lasciata com'era |
-| `V2_snapshot/` | ex `Thesis/V2/`: copia congelata al 2-12 luglio 2026 di file poi evoluti in `Src/`. Era sul path insieme agli originali |
+| `scripts/`     | superseded mains, tests and plotting scripts (including `test_04_main_V2.m` and `test_04_postProcessing_V2.m`, now merged into the unified mains) |
+| `Src/`         | superseded classes: `AbaqusStructure_V2`, `TransientSolverOde_V2`, the Newmark/Leapfrog solvers, the `residual_*` functions, scratch scripts |
+| `meshes/`      | Abaqus meshes no longer used (`.inp` V1, V2, V3). The current model is `Src/DummyStructureAbaqus_V4.inp` |
+| `Old/`         | pre-existing `Old/` folder, left as it was |
+| `V2_snapshot/` | former `Thesis/V2/`: a copy frozen between 2 and 12 July 2026 of files that later evolved in `Src/`. It used to sit on the path alongside the originals |
 
-## Come recuperare un file
+## Restoring a file
 
 ```bash
-git mv "Thesis/test_04_Dummy_model/+archive/scripts/nome.m" Thesis/test_04_Dummy_model/
+git mv "Thesis/test_04_Dummy_model/+archive/scripts/name.m" Thesis/test_04_Dummy_model/
 ```
 
-Se lo si rimette in `Src/`, controllare prima che non abbia lo stesso nome di
-un file gia' presente.
+If it goes back into `Src/`, first check that its name does not clash with a
+file already there.

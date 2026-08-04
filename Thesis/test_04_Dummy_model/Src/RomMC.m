@@ -1,22 +1,26 @@
 classdef RomMC < handle
-    % ROMMC Builds the reduction basis (ROM) using Milman-Chu vectors 
-    % Multi-vector approach: one enrichment vector per contact DOF.
-    
+    % ROMMC Reduction basis built from linear modes plus Milman-Chu vectors.
+    %
+    % Multi-vector approach: one static enrichment vector per contact DOF.
+    % Setting include_MC = false skips the enrichment and leaves plain modal
+    % truncation, which is how the MT method is obtained.
+
     properties
-        DummyStruct 
-        P           
-        numModes    
-        contactDofs 
-        spring_k    
-        include_MC  
+        DummyStruct     % AbaqusStructure object
+        P               % Projection matrix on the global (unconstrained) DOFs
+        numModes        % Number of retained linear modes
+        contactDofs     % Constrained contact DOFs, column vector
+        spring_k        % Contact penalty stiffness used to close the interface
+        include_MC      % true -> modes + MC vectors, false -> modes only (MT)
     end
-    
+
     methods
         function obj = RomMC(dummy_struct, num_linear_modes, contact_dofs_constrained, penalty_k, include_MC)
             obj.DummyStruct = dummy_struct;
             obj.numModes = num_linear_modes;
-            % FORZATURA A VETTORE COLONNA PER MULTI-INTERFACCIA
-            obj.contactDofs = contact_dofs_constrained(:); 
+            % Force a column vector: the multi-interface case concatenates
+            % the DOFs of several interfaces.
+            obj.contactDofs = contact_dofs_constrained(:);
             
             if nargin < 4 || isempty(penalty_k)
                 obj.spring_k = 0;
@@ -52,10 +56,10 @@ classdef RomMC < handle
             if obj.include_MC
                 fprintf('Calculating %d Milman-Chu static enrichment vectors for %d interfaces...\n', n_bnd, n_bnd);
                 
-                % Forza unitaria su ogni nodo dell'interfaccia aggregata
+                % Unit force on each DOF of the aggregated interface
                 F_int_c = sparse(obj.contactDofs, 1:n_bnd, 1, n_dofs_c, n_bnd);
-                
-                % Rigidezza applicata a tutti i nodi di contatto contemporaneamente
+
+                % Penalty stiffness applied to all contact DOFs at once
                 K_spring_c = sparse(obj.contactDofs, obj.contactDofs, obj.spring_k, n_dofs_c, n_dofs_c);
                 Kc_closed = Kc + K_spring_c;
                 
@@ -73,7 +77,10 @@ classdef RomMC < handle
             fprintf('--- ROM Build Complete ---\n');
         end
         
-        function P_ortho = gram_schmidt(obj, V, M)
+        function P_ortho = gram_schmidt(~, V, M)
+            % GRAM_SCHMIDT Mass-orthogonal Gram-Schmidt orthogonalization.
+            % Columns that collapse to zero are linearly dependent on the
+            % previous ones and get dropped.
             n_vecs = size(V, 2);
             P_ortho = zeros(size(V));
             for i = 1:n_vecs

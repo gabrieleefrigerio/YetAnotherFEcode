@@ -1,20 +1,20 @@
 function y_contact = extract_contact_response(Struct, Interfaces, labels, q_constrained)
-%EXTRACT_CONTACT_RESPONSE Storie temporali dei nodi di contatto, per interfaccia.
+%EXTRACT_CONTACT_RESPONSE Time histories of the contact nodes, per interface.
 %
 %   y_contact = EXTRACT_CONTACT_RESPONSE(Struct, Interfaces, labels, q)
 %
-%   Struct        oggetto AbaqusStructure (serve per unconstrain_vector)
-%   Interfaces    struct dei metadati di interfaccia prodotta dal main
-%   labels        cell array delle etichette da estrarre
-%   q_constrained spostamenti sui GdL liberi, [n_dofs_c x n_time]
+%   Struct        AbaqusStructure object, needed for unconstrain_vector
+%   Interfaces    interface metadata struct produced by the main
+%   labels        cell array of the interface labels to extract
+%   q_constrained displacements on the free DOFs, [n_dofs_c x n_time]
 %
-%   Restituisce una struct con un campo per interfaccia:
-%       y_contact.<label>.X   [n_nodi x n_time]  spostamenti in X
-%       y_contact.<label>.Y   [n_nodi x n_time]  spostamenti in Y
+%   Returns a struct with one field per interface:
+%       y_contact.<label>.X   [n_nodes x n_time]  displacements along X
+%       y_contact.<label>.Y   [n_nodes x n_time]  displacements along Y
 %
-%   Entrambe le componenti vengono salvate a prescindere dalla direzione di
-%   contatto dell'interfaccia: quella normale serve per il gap, quella
-%   tangenziale per vedere lo scorrimento lungo la parete.
+%   Both components are stored regardless of the contact direction of the
+%   interface: the normal one drives the gap, the tangential one shows the
+%   sliding along the wall.
 
 y_full    = Struct.AssemblyObj.unconstrain_vector(q_constrained);
 y_contact = struct();

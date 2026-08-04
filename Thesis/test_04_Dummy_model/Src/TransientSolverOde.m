@@ -1,40 +1,38 @@
 classdef TransientSolverOde < handle
-    % TRANSIENTSOLVERODE Integratore implicito (ode15s) con contatto a penalita'.
+    % TRANSIENTSOLVERODE Implicit integrator (ode15s) with penalty contact.
     %
-    % Unifica le due versioni precedenti (TransientSolverOde e
-    % TransientSolverOde_V2). Gestisce un numero qualsiasi di GdL di contatto,
-    % ognuno con il proprio gap FIRMATO:
+    % Handles any number of contact DOFs, each with its own SIGNED gap:
     %
-    %   gap > 0  ->  muro nella direzione positiva del GdL, penetra se q > gap
-    %   gap < 0  ->  muro nella direzione negativa del GdL, penetra se q < gap
+    %   gap > 0  ->  wall along the positive direction of the DOF, penetrates if q > gap
+    %   gap < 0  ->  wall along the negative direction of the DOF, penetrates if q < gap
     %
-    % Il test e' sign(gap)*(q - gap) > 0, che con gap scalare positivo si
-    % riduce a q > gap: il comportamento della versione a interfaccia singola
-    % e' quindi contenuto in questo come caso particolare.
+    % The activation test is sign(gap)*(q - gap) > 0, which reduces to q > gap
+    % for a positive scalar gap. The single-interface behaviour is therefore a
+    % particular case of this one, and no separate solver is needed.
     %
-    % Parametri di solve():
-    %   'ContactTargetDOF'  GdL di contatto (indici nel vettore risolto)
-    %   'ContactGap'        gap firmato, scalare o vettore [n_c x 1]
-    %   'ContactPenalty'    rigidezza di penalita', scalare o vettore
+    % Options of solve():
+    %   'ContactTargetDOF'  contact DOFs (indices in the solved vector)
+    %   'ContactGap'        signed gap, scalar or vector [n_c x 1]
+    %   'ContactPenalty'    penalty stiffness, scalar or vector
     %   'ModelType'         'FOM' | 'MC' | 'Rubin' | 'MCB' | 'MN'
-    %   'ProjectionMatrix'  richiesta solo da 'MC'
-    %   'Eref'              energia di riferimento -> AbsTol pesata in energia
-    %   'AbsTol'            AbsTol scalare, usata se 'Eref' non e' fornita
-    %   'RelTol'            tolleranza relativa (default 1e-8)
-    %   'OutputTimes'       griglia temporale di output (default: passi interni)
+    %   'ProjectionMatrix'  required by 'MC' only
+    %   'Eref'              reference energy -> energy-weighted AbsTol
+    %   'AbsTol'            scalar AbsTol, used when 'Eref' is not supplied
+    %   'RelTol'            relative tolerance (default 1e-8)
+    %   'OutputTimes'       output time grid (default: internal steps)
     %
-    % AbsTol: una AbsTol scalare non e' invariante rispetto alla base di
-    % riduzione, quindi applica criteri d'errore diversi a ROM diversi.
-    % Passando 'Eref' la tolleranza viene pesata sull'energia meccanica, che e'
-    % uno scalare fisico e quindi identico per tutte le basi:
+    % On AbsTol: a scalar AbsTol is not invariant with respect to the
+    % reduction basis, so it applies different error criteria to different
+    % ROMs. Passing 'Eref' weights the tolerance on the mechanical energy,
+    % which is a physical scalar and therefore identical across bases:
     %   atol_q(i)  = epsE*sqrt(2*Eref/K_ii)
     %   atol_qd(i) = epsE*sqrt(2*Eref/M_ii)
-    % Senza 'Eref' si ricade sulla AbsTol scalare (comportamento storico).
+    % Without 'Eref' the solver falls back to the scalar AbsTol.
 
     properties
-        M % Matrice di massa
-        K % Matrice di rigidezza
-        C % Matrice di smorzamento
+        M % Mass matrix
+        K % Stiffness matrix
+        C % Damping matrix
     end
 
     methods
@@ -68,7 +66,7 @@ classdef TransientSolverOde < handle
                            ~isempty(args.ContactGap) && ~isempty(args.ContactPenalty);
             if ~is_nonlinear
                 error('TSO:LinearUnsupported', ...
-                    'Simulazione lineare non supportata: fornire ContactTargetDOF, ContactGap e ContactPenalty.');
+                    'Linear simulation is not supported: provide ContactTargetDOF, ContactGap and ContactPenalty.');
             end
 
             if isscalar(obj.C) && obj.C == 0
@@ -80,37 +78,37 @@ classdef TransientSolverOde < handle
             n_dofs      = size(obj.K, 1);
             y0          = [q0; qd0];
 
-            % --- gap e penalita' espansi a vettore [n_c x 1] ---
+            % --- expand gap and penalty to [n_c x 1] vectors ---
             gap_wall = args.ContactGap(:);
             if isscalar(gap_wall), gap_wall = gap_wall * ones(n_c, 1); end
             k_penalty = args.ContactPenalty(:);
             if isscalar(k_penalty), k_penalty = k_penalty * ones(n_c, 1); end
 
             if numel(gap_wall) ~= n_c
-                error('TSO:GapSize', 'ContactGap ha %d elementi, attesi %d.', numel(gap_wall), n_c);
+                error('TSO:GapSize', 'ContactGap has %d elements, expected %d.', numel(gap_wall), n_c);
             end
             if numel(k_penalty) ~= n_c
-                error('TSO:PenaltySize', 'ContactPenalty ha %d elementi, attesi %d.', numel(k_penalty), n_c);
+                error('TSO:PenaltySize', 'ContactPenalty has %d elements, expected %d.', numel(k_penalty), n_c);
             end
             if any(gap_wall == 0)
                 error('TSO:ZeroGap', ...
-                    ['Almeno un gap e'' nullo: il segno del gap definisce da che parte ' ...
-                     'sta il muro, quindi un gap zero e'' ambiguo.']);
+                    ['At least one gap is zero. The sign of the gap tells which side ' ...
+                     'the wall is on, so a zero gap is ambiguous.']);
             end
 
-            % --- matrice di massa del sistema in forma di stato ---
+            % --- mass matrix of the state-space system ---
             M_state = blkdiag(speye(n_dofs), obj.M);
 
-            % --- setup specifico del modello ---
+            % --- model-specific setup ---
             mass_singular = 'no';
             Pc_contact = [];
 
             switch upper(args.ModelType)
                 case {'FOM', 'RUBIN', 'MCB', 'MN'}
-                    % L'interfaccia e' in testa al vettore ridotto per i ROM CMS,
-                    % quindi i GdL di contatto sono indici diretti.
+                    % The interface sits at the head of the reduced vector for
+                    % the CMS ROMs, so the contact DOFs are direct indices.
                     if any(strcmpi(args.ModelType, {'MCB', 'MN'}))
-                        % Massa nulla al boundary -> ode15s in modalita' DAE.
+                        % Zero mass at the boundary -> run ode15s in DAE mode.
                         mass_singular = 'yes';
                     end
                     der_handle = @(tc, y) state_space_standard(tc, y, obj.K, obj.C, ...
@@ -122,7 +120,7 @@ classdef TransientSolverOde < handle
                     Pc = args.ProjectionMatrix;
                     if isempty(Pc)
                         error('TSO:NoProjection', ...
-                            'Il metodo MC richiede ProjectionMatrix (Pc).');
+                            'The MC method requires ProjectionMatrix (Pc).');
                     end
                     Pc_contact = Pc(target_dofs, :);
                     der_handle = @(tc, y) state_space_projected(tc, y, obj.K, obj.C, ...
@@ -132,18 +130,18 @@ classdef TransientSolverOde < handle
 
                 otherwise
                     error('TSO:BadModelType', ...
-                        'ModelType non riconosciuto: usare FOM, MC, Rubin, MCB o MN.');
+                        'Unrecognized ModelType: use FOM, MC, Rubin, MCB or MN.');
             end
 
-            % --- tolleranze ---
+            % --- tolerances ---
             reltol = args.RelTol;
             if isempty(args.Eref)
                 abstol = args.AbsTol;
-                fprintf('  AbsTol scalare %.2e | RelTol %.1e\n', abstol, reltol);
+                fprintf('  Scalar AbsTol %.2e | RelTol %.1e\n', abstol, reltol);
             else
                 epsE = 1e-2 * reltol;
 
-                % rigidezza di contatto, caso peggiore (tutti i GdL attivi)
+                % Contact stiffness, worst case with every DOF active
                 dK_c = zeros(n_dofs, 1);
                 if strcmpi(args.ModelType, 'MC')
                     dK_c = full(sum((Pc_contact.^2) .* k_penalty, 1)).';
@@ -152,12 +150,12 @@ classdef TransientSolverOde < handle
                 end
 
                 dM = abs(full(diag(obj.M)));
-                dM = max(dM, 1e-6 * median(dM(dM > 0)));      % guardia massless
+                dM = max(dM, 1e-6 * median(dM(dM > 0)));      % massless guard
                 dK = abs(full(diag(obj.K))) + dK_c;
-                dK = max(dK, (2*pi/tmax)^2 .* dM);            % floor sui modi lenti
+                dK = max(dK, (2*pi/tmax)^2 .* dM);            % floor on the slow modes
 
                 abstol = epsE * [sqrt(2*args.Eref ./ dK); sqrt(2*args.Eref ./ dM)];
-                fprintf('  AbsTol energetica [%.2e .. %.2e] | RelTol %.1e\n', ...
+                fprintf('  Energy-weighted AbsTol [%.2e .. %.2e] | RelTol %.1e\n', ...
                     min(abstol), max(abstol), reltol);
             end
 
@@ -165,8 +163,8 @@ classdef TransientSolverOde < handle
                 'Mass', M_state, 'MassSingular', mass_singular, ...
                 'Jacobian', jac_handle, 'Stats', args.Stats);
 
-            % --- integrazione ---
-            fprintf('Integrazione modello %s con Jacobiano analitico (RelTol %g)...\n', ...
+            % --- integration ---
+            fprintf('Integrating %s model with analytical Jacobian (RelTol %g)...\n', ...
                 upper(args.ModelType), reltol);
             tic;
             if isempty(args.OutputTimes)
@@ -179,22 +177,22 @@ classdef TransientSolverOde < handle
 
             t = t_out';
             q_history = y_out(:, 1:n_dofs)';
-            fprintf('Tempo di integrazione ode15s: %.2f s\n', integration_time);
+            fprintf('ode15s integration time: %.2f s\n', integration_time);
 
             % ===============================================================
-            % FUNZIONI LOCALI: SPAZIO DI STATO E JACOBIANI ANALITICI
+            % LOCAL FUNCTIONS: STATE SPACE AND ANALYTICAL JACOBIANS
             % ===============================================================
 
-            % --- 1. FOM, RUBIN, MCB, MN (GdL fisici diretti) ---
+            % --- 1. FOM, RUBIN, MCB, MN (direct physical DOFs) ---
             function f = state_space_standard(t_curr, y, K, C, contact_dofs, gap, k_pen, F_ext_handle)
                 n  = size(K, 1);
                 q  = y(1:n);
                 qd = y(n+1:end);
 
-                % Compenetrazione col segno
+                % Signed penetration
                 penetration = q(contact_dofs) - gap;
 
-                % Attivo solo se il GdL supera il muro nella direzione giusta
+                % Active only if the DOF crossed the wall in the right direction
                 is_pen = (sign(gap) .* penetration) > 0;
 
                 F_pen = zeros(n, 1);
@@ -225,7 +223,7 @@ classdef TransientSolverOde < handle
                 J = [Z, I; -K_eff, -C];
             end
 
-            % --- 2. MC (GdL di contatto proiettati) ---
+            % --- 2. MC (projected contact DOFs) ---
             function f = state_space_projected(t_curr, y, K, C, Pcc, gap, k_pen, F_ext_handle)
                 n  = size(K, 1);
                 q  = y(1:n);

@@ -1,46 +1,46 @@
 %% =====================================================================
-%  POST-PROCESSING - FOM vs ROM, confronto e convergenza
+%  POST-PROCESSING - FOM vs ROM comparison and convergence
 %
-%  Main unico, adattivo nel numero di interfacce di contatto: facce,
-%  direzioni e gap NON sono scritti qui, ma letti da run_config.mat nella
-%  cartella dei risultati. Il post-processing si adatta quindi da solo sia
-%  al modello a quattro interfacce sia a quello a una sola, e non puo'
-%  andare fuori sincrono con i gap effettivamente usati nella simulazione.
+%  Single main, adaptive in the number of contact interfaces: faces,
+%  directions and gaps are NOT written here but read from run_config.mat in
+%  the results folder. The post-processing therefore adapts by itself to the
+%  four-interface model as well as to a single-interface one, and cannot
+%  drift out of sync with the gaps actually used in the simulation.
 %
-%  Prodotti:
-%    - una figura per metodo, con un subplot per interfaccia + GRE(t)
-%    - GRE_Results.txt      log testuale
-%    - summary_<mode>.csv   tabella riassuntiva
-%    - Summary_GRE_vs_phi   convergenza dell'errore al crescere dei modi
-%    - Summary_Pareto       compromesso accuratezza / costo online
+%  Outputs:
+%    - one figure per method, with a subplot per interface plus GRE(t)
+%    - GRE_Results.txt      text log
+%    - summary_<mode>.csv   summary table
+%    - Summary_GRE_vs_phi   error convergence against the number of modes
+%    - Summary_Pareto       accuracy / online cost trade-off
 %
-%  Nessuna interpolazione: tutti i modelli sono salvati sulla stessa griglia
-%  t_common. Se un file non la rispetta lo script si ferma, invece di
-%  confrontare silenziosamente dati non confrontabili.
+%  No interpolation: every model is stored on the same t_common grid. If a
+%  file does not respect it the script stops, rather than silently comparing
+%  data that is not comparable.
 % =====================================================================
 clear; close all; clc;
 
-%% --- Opzioni ----------------------------------------------------------
+%% --- Options ----------------------------------------------------------
 
-% Metrica GRE di riferimento (quella che finisce in legenda e nelle sintesi):
-%   'full'   -> intera time history
-%   'window' -> primi win_frac della simulazione
-% Oltre i primi impatti l'esponente di Lyapunov positivo fa divergere le
-% traiettorie: l'errore satura per ragioni fisiche, non numeriche. Entrambe
-% le metriche vengono comunque sempre calcolate e loggate.
+% Reference GRE metric, the one shown in the legends and the summaries:
+%   'full'   -> whole time history
+%   'window' -> first win_frac of the simulation
+% Past the first impacts the positive Lyapunov exponent makes the
+% trajectories diverge: the error saturates for physical reasons, not
+% numerical ones. Both metrics are always computed and logged anyway.
 gre_mode = 'full';
 win_frac = 0.25;
 
-% Floor di integrazione misurato con lo studio di convergenza in tolleranza
-% (MC 3.0e-7, Rubin 2.82e-7 -> indipendente dalla base, origine nel contatto).
-% Sotto questa soglia il GRE non e' piu' errore di riduzione.
+% Integration floor measured with the tolerance convergence study
+% (MC 3.0e-7, Rubin 2.82e-7 -> independent of the basis, originating in the
+% contact). Below this threshold the GRE is no longer a reduction error.
 gre_floor_pct = 3.0e-7 * 100;
 
-% Scala dell'asse Y del subplot GRE(t). In lineare il floor collassa sullo
-% zero e la sua linea non e' leggibile, quindi viene disegnata solo in log.
+% Y-axis scale of the GRE(t) subplot. On a linear scale the floor collapses
+% onto zero and its line is unreadable, so it is drawn only in log scale.
 gre_plot_log = false;
 
-% Nodo di ciascuna interfaccia da disegnare nelle time history.
+% Node of each interface to draw in the time histories.
 node_idx = 1;
 
 switch lower(gre_mode)
@@ -51,28 +51,28 @@ switch lower(gre_mode)
         gre_tag = 'GRE_full'; gre_tag_tex = 'GRE_{full}';
         gre_desc = 'GRE on the whole time history [%]';
     otherwise
-        error('gre_mode non valido: usare ''full'' oppure ''window''.');
+        error('PP:BadMode', 'Invalid gre_mode: use ''full'' or ''window''.');
 end
-fprintf('Metrica di riferimento: %s\n', gre_tag);
+fprintf('Reference metric: %s\n', gre_tag);
 
-%% --- 1. Cartella dei risultati ----------------------------------------
-results_dir = uigetdir(pwd, 'Selezionare la cartella dei risultati');
+%% --- 1. Results folder ------------------------------------------------
+results_dir = uigetdir(pwd, 'Select the results folder');
 if results_dir == 0
-    error('Nessuna cartella selezionata.');
+    error('PP:NoFolder', 'No folder selected.');
 end
-fprintf('Cartella: %s\n', results_dir);
+fprintf('Folder: %s\n', results_dir);
 
 cfg_file = fullfile(results_dir, 'run_config.mat');
 if ~exist(cfg_file, 'file')
     error('PP:NoConfig', ...
-        ['run_config.mat non trovato in\n  %s\n' ...
-         'Questa cartella e'' stata prodotta da una versione precedente del main, ' ...
-         'che non salvava la configurazione. Rilanciare la simulazione con test_04_main.m.'], ...
+        ['run_config.mat not found in\n  %s\n' ...
+         'This folder was produced by an earlier version of the main, which did ' ...
+         'not save the configuration. Re-run the simulation with test_04_main.m.'], ...
         results_dir);
 end
 R = load(cfg_file);
 
-%% --- 2. Tabella delle interfacce (letta dal file, non riscritta a mano) ---
+%% --- 2. Interface table (read from the file, not rewritten by hand) ----
 faces    = R.active_labels;
 n_faces  = numel(faces);
 face_dir = cell(1, n_faces);
@@ -86,36 +86,36 @@ for i = 1:n_faces
     face_gap(i) = R.Interfaces.(faces{i}).gap;
 end
 
-fprintf('Interfacce: %d\n', n_faces);
+fprintf('Interfaces: %d\n', n_faces);
 for i = 1:n_faces
-    fprintf('  %-4s dir %s  gap %+9.3e m  (%d nodi)\n', ...
+    fprintf('  %-4s dir %s  gap %+9.3e m  (%d nodes)\n', ...
         faces{i}, face_dir{i}, face_gap(i), numel(R.Interfaces.(faces{i}).nodes));
 end
 fprintf('Eref = %.4e J\n', R.Eref);
 
-%% --- 3. Log e accumulatore --------------------------------------------
+%% --- 3. Log and accumulator -------------------------------------------
 fom_files = dir(fullfile(results_dir, 'FOM_*.mat'));
 if isempty(fom_files)
-    error('PP:NoFOM', 'Nessun file FOM_*.mat: serve un riferimento per il confronto.');
+    error('PP:NoFOM', 'No FOM_*.mat file: a reference is needed for the comparison.');
 end
 
-% NB: chiusura esplicita in fondo allo script. onCleanup qui non servirebbe:
-% in uno script le variabili restano nel workspace base a fine esecuzione,
-% quindi l'oggetto non viene distrutto e il file resterebbe aperto.
+% Note: closed explicitly at the end of the script. onCleanup would not help
+% here, because in a script the variables stay in the base workspace after
+% execution, so the object is never destroyed and the file would stay open.
 log_file = fopen(fullfile(results_dir, 'GRE_Results.txt'), 'w');
 fprintf(log_file, '======================================================\n');
 fprintf(log_file, ' GLOBAL RELATIVE ERROR (GRE) & TIME REPORT\n');
 fprintf(log_file, '======================================================\n');
-fprintf(log_file, ' Interfacce: %s\n', strjoin(faces, ', '));
-fprintf(log_file, ' Metrica di riferimento: %s (finestra %.0f%%)\n', gre_tag, 100*win_frac);
-fprintf(log_file, ' Floor di integrazione: %.2e %%\n', gre_floor_pct);
+fprintf(log_file, ' Interfaces: %s\n', strjoin(faces, ', '));
+fprintf(log_file, ' Reference metric: %s (window %.0f%%)\n', gre_tag, 100*win_frac);
+fprintf(log_file, ' Integration floor: %.2e %%\n', gre_floor_pct);
 fprintf(log_file, ' Eref = %.4e J\n\n', R.Eref);
 
 summary = struct('method', {}, 'phi', {}, 'Q', {}, 'K', {}, ...
                  'gre_full', {}, 'gre_win', {}, 'gre_ref', {}, ...
                  'cpu', {}, 'offline', {});
 
-%% --- 4. Ciclo sui casi (Q, k_mult) ------------------------------------
+%% --- 4. Loop over the cases (Q, k_mult) -------------------------------
 for i_fom = 1:numel(fom_files)
     tok = regexp(fom_files(i_fom).name, 'FOM_Q(\d+)_K([\d\.]+)\.mat', 'tokens');
     if isempty(tok), continue; end
@@ -123,9 +123,9 @@ for i_fom = 1:numel(fom_files)
     K_val = str2double(tok{1}{2});
 
     fprintf('\n======================================================\n');
-    fprintf('Caso: Q = %d | k_mult = %g\n', Q_val, K_val);
+    fprintf('Case: Q = %d | k_mult = %g\n', Q_val, K_val);
     fprintf('======================================================\n');
-    fprintf(log_file, '>>> CASO: Q = %d | k_mult = %g <<<\n', Q_val, K_val);
+    fprintf(log_file, '>>> CASE: Q = %d | k_mult = %g <<<\n', Q_val, K_val);
 
     fom   = load(fullfile(results_dir, fom_files(i_fom).name));
     t_ref = fom.t(:);
@@ -139,10 +139,10 @@ for i_fom = 1:numel(fom_files)
         fom_legend = 'FOM';
     end
 
-    % --- ROM disponibili per questo caso, raggruppati per metodo ---
+    % --- ROMs available for this case, grouped by method ---
     rom_files = dir(fullfile(results_dir, sprintf('ROM_*_Q%04d_K%g.mat', Q_val, K_val)));
     if isempty(rom_files)
-        fprintf('  Nessun ROM per questo caso.\n');
+        fprintf('  No ROM for this case.\n');
         continue;
     end
     rom_models = cell(1, numel(rom_files));
@@ -152,7 +152,7 @@ for i_fom = 1:numel(fom_files)
     end
     methods_here = unique(rom_models, 'stable');
 
-    %% --- Ciclo sui metodi ---
+    %% --- Loop over the methods ---
     for im = 1:numel(methods_here)
         method    = methods_here{im};
         sel_files = rom_files(strcmp(rom_models, method));
@@ -163,7 +163,7 @@ for i_fom = 1:numel(fom_files)
         n_sub = n_faces + 1;
         axs   = gobjects(n_sub, 1);
 
-        % --- un subplot per interfaccia: risposta del FOM e posizione del muro ---
+        % --- one subplot per interface: FOM response and wall position ---
         for f = 1:n_faces
             axs(f) = subplot(n_sub, 1, f);
             hold(axs(f), 'on'); grid(axs(f), 'on');
@@ -180,17 +180,17 @@ for i_fom = 1:numel(fom_files)
                 yline(axs(f), face_gap(f), 'r-.', 'LineWidth', 1.5, ...
                     'HandleVisibility', 'off');
             end
-            title(axs(f), sprintf('Interfaccia %s (dir %s, gap %+.2e m) - nodo %d', ...
+            title(axs(f), sprintf('Interface %s (dir %s, gap %+.2e m) - node %d', ...
                 faces{f}, face_dir{f}, face_gap(f), node_idx));
-            xlabel(axs(f), 'Tempo [s]');
-            ylabel(axs(f), 'Spostamento [m]');
+            xlabel(axs(f), 'Time [s]');
+            ylabel(axs(f), 'Displacement [m]');
         end
 
-        % --- subplot GRE(t) ---
+        % --- GRE(t) subplot ---
         axs(n_sub) = subplot(n_sub, 1, n_sub);
         hold(axs(n_sub), 'on'); grid(axs(n_sub), 'on');
-        title(axs(n_sub), 'Global Relative Error nel tempo');
-        xlabel(axs(n_sub), 'Tempo [s]');
+        title(axs(n_sub), 'Global Relative Error over time');
+        xlabel(axs(n_sub), 'Time [s]');
         ylabel(axs(n_sub), 'GRE [%]');
         if gre_plot_log
             set(axs(n_sub), 'YScale', 'log');
@@ -208,13 +208,13 @@ for i_fom = 1:numel(fom_files)
             rom   = load(fullfile(results_dir, sel_files(i_rom).name));
             t_rom = rom.t(:);
 
-            % Griglia comune: nessuna interpolazione. Se un run non la
-            % rispetta ci si ferma qui invece di confrontare dati diversi.
+            % Common grid, no interpolation. If a run does not respect it we
+            % stop here rather than comparing different things.
             if numel(t_rom) ~= nT || max(abs(t_rom - t_ref)) > 1e-9*(t_ref(end)-t_ref(1))
                 error('PP:GridMismatch', ...
-                    ['Griglia temporale incoerente in %s.\n' ...
-                     'FOM: %d punti, ROM: %d punti.\n' ...
-                     'Rilanciare quel run sulla griglia comune t_common.'], ...
+                    ['Inconsistent time grid in %s.\n' ...
+                     'FOM: %d points, ROM: %d points.\n' ...
+                     'Re-run that case on the common grid t_common.'], ...
                     sel_files(i_rom).name, nT, numel(t_rom));
             end
 
@@ -227,7 +227,7 @@ for i_fom = 1:numel(fom_files)
             if isfield(rom, 'cpu_time'),     rom_cpu = rom.cpu_time;     else, rom_cpu = NaN; end
             if isfield(rom, 'offline_time'), rom_off = rom.offline_time; else, rom_off = NaN; end
 
-            % --- tutti i GdL di contatto concatenati, su tutte le interfacce ---
+            % --- all contact DOFs concatenated, across every interface ---
             y_fom_cat = [];
             y_rom_cat = [];
             for f = 1:n_faces
@@ -241,12 +241,12 @@ for i_fom = 1:numel(fom_files)
             gre_ref  = norm(y_fom_cat(:,i_gre) - y_rom_cat(:,i_gre), 'fro') / ...
                        norm(y_fom_cat(:,i_gre), 'fro') * 100;
 
-            % GRE istantaneo, normalizzato sul massimo dell'intera storia,
-            % cosi' la curva disegnata non dipende dal flag gre_mode.
+            % Instantaneous GRE, normalized on the maximum of the whole
+            % history, so that the plotted curve does not depend on gre_mode.
             norm_diff_t = sqrt(sum((y_fom_cat - y_rom_cat).^2, 1));
             gre_t = norm_diff_t ./ (max(sqrt(sum(y_fom_cat.^2, 1))) + eps) * 100;
 
-            % --- legenda ---
+            % --- legend ---
             time_info = '';
             if ~isnan(rom_off), time_info = sprintf('Off: %.2fs', rom_off); end
             if ~isnan(rom_cpu)
@@ -284,12 +284,12 @@ for i_fom = 1:numel(fom_files)
             if isnan(rom_off), off_str = 'N/A'; else, off_str = sprintf('%6.2fs', rom_off); end
             if isnan(rom_cpu), on_str  = 'N/A'; else, on_str  = sprintf('%6.2fs', rom_cpu); end
             if gre_ref < 100 * gre_floor_pct
-                flag = '  [!] vicino al floor di integrazione';
+                flag = '  [!] close to the integration floor';
             else
                 flag = '';
             end
-            % Entrambe le metriche sempre in chiaro; quale sia il riferimento
-            % e' scritto nell'intestazione ed e' quella usata nelle sintesi.
+            % Both metrics are always shown; which one is the reference is
+            % stated in the header and is the one used in the summaries.
             fprintf('  [%-6s] Phi %3d | GRE_full %9.4f%% | GRE_win %9.4f%% | Off %s | On %s%s\n', ...
                 method, phi_val, gre_full, gre_win, off_str, on_str, flag);
             fprintf(log_file, '  %-6s Phi %03d | GRE_full %9.4f%% | GRE_win %9.4f%% | Off %s | On %s%s\n', ...
@@ -297,20 +297,20 @@ for i_fom = 1:numel(fom_files)
         end
 
         legend(axs(1), 'Location', 'best');
-        sgtitle(fig, sprintf('Metodo %s (Q = %d, k_{mult} = %g)', method, Q_val, K_val), ...
+        sgtitle(fig, sprintf('%s method (Q = %d, k_{mult} = %g)', method, Q_val, K_val), ...
             'FontSize', 16, 'FontWeight', 'bold');
 
         base_name = fullfile(results_dir, sprintf('Compare_%s_Q%d_K%g', method, Q_val, K_val));
         exportgraphics(fig, [base_name '.png'], 'Resolution', 300);
         savefig(fig, [base_name '.fig']);
-        fprintf('  -> figura salvata: %s.png\n', base_name);
+        fprintf('  -> figure saved: %s.png\n', base_name);
     end
     fprintf(log_file, '\n');
 end
 
-%% --- 5. Figure di sintesi ---------------------------------------------
+%% --- 5. Summary figures -----------------------------------------------
 if isempty(summary)
-    fprintf('\nNessun ROM confrontato: figure di sintesi saltate.\n');
+    fprintf('\nNo ROM compared: summary figures skipped.\n');
     fclose(log_file);
     return
 end
@@ -321,8 +321,8 @@ writetable(T_summary, fullfile(results_dir, sprintf('summary_%s.csv', lower(gre_
 uniq_methods = unique(T_summary.method, 'stable');
 mk = {'o-','s-','^-','d-','v-','>-'};
 
-% --- Figura A: convergenza del GRE al crescere dei modi ---
-figA = figure('Name','Convergenza in phi','Color','w','Position',[100 100 800 600]);
+% --- Figure A: GRE convergence against the number of modes ---
+figA = figure('Name','Convergence in phi','Color','w','Position',[100 100 800 600]);
 hold on; grid on;
 for m = 1:numel(uniq_methods)
     sel = strcmp(T_summary.method, uniq_methods{m});
@@ -333,16 +333,16 @@ for m = 1:numel(uniq_methods)
 end
 yline(gre_floor_pct, 'r--', 'LineWidth', 1.5, 'DisplayName', 'Integration floor');
 set(gca, 'XScale', 'log', 'YScale', 'log');
-xlabel('Numero di modi ritenuti \phi');
+xlabel('Number of retained modes \phi');
 ylabel(gre_desc);
-title('Convergenza del ROM: errore di riduzione vs dimensione della base');
+title('ROM convergence: reduction error vs basis size');
 legend('Location','southwest'); box on;
 exportgraphics(figA, fullfile(results_dir, ...
     sprintf('Summary_GRE_vs_phi_%s.png', lower(gre_mode))), 'Resolution', 300);
 savefig(figA, fullfile(results_dir, sprintf('Summary_GRE_vs_phi_%s.fig', lower(gre_mode))));
 
-% --- Figura B: compromesso accuratezza / costo online ---
-figB = figure('Name','Pareto accuratezza-costo','Color','w','Position',[100 100 800 600]);
+% --- Figure B: accuracy / online cost trade-off ---
+figB = figure('Name','Accuracy-cost Pareto','Color','w','Position',[100 100 800 600]);
 hold on; grid on;
 for m = 1:numel(uniq_methods)
     sel = strcmp(T_summary.method, uniq_methods{m});
@@ -353,17 +353,17 @@ for m = 1:numel(uniq_methods)
 end
 yline(gre_floor_pct, 'r--', 'LineWidth', 1.5, 'DisplayName', 'Integration floor');
 set(gca, 'XScale', 'log', 'YScale', 'log');
-xlabel('Tempo CPU online [s]');
+xlabel('Online CPU time [s]');
 ylabel(gre_desc);
-title('Compromesso accuratezza-costo (online)');
+title('Accuracy-cost trade-off (online)');
 legend('Location','southwest'); box on;
 exportgraphics(figB, fullfile(results_dir, ...
     sprintf('Summary_Pareto_%s.png', lower(gre_mode))), 'Resolution', 300);
 savefig(figB, fullfile(results_dir, sprintf('Summary_Pareto_%s.fig', lower(gre_mode))));
 
-%% --- 6. Ordine di convergenza osservato -------------------------------
-fprintf('\n--- Ordine di convergenza osservato (%s ~ phi^-p) ---\n', gre_tag);
-fprintf(log_file, '\n--- Ordine di convergenza osservato (%s ~ phi^-p) ---\n', gre_tag);
+%% --- 6. Observed convergence order ------------------------------------
+fprintf('\n--- Observed convergence order (%s ~ phi^-p) ---\n', gre_tag);
+fprintf(log_file, '\n--- Observed convergence order (%s ~ phi^-p) ---\n', gre_tag);
 for m = 1:numel(uniq_methods)
     sel  = strcmp(T_summary.method, uniq_methods{m});
     phis = T_summary.phi(sel);
@@ -371,10 +371,10 @@ for m = 1:numel(uniq_methods)
     ok   = phis > 0 & g > 0;
     if nnz(ok) >= 2
         pfit = polyfit(log(phis(ok)), log(g(ok)), 1);
-        fprintf('  %-8s : p = %.2f   (%d punti)\n', uniq_methods{m}, -pfit(1), nnz(ok));
-        fprintf(log_file, '  %-8s : p = %.2f   (%d punti)\n', uniq_methods{m}, -pfit(1), nnz(ok));
+        fprintf('  %-8s : p = %.2f   (%d points)\n', uniq_methods{m}, -pfit(1), nnz(ok));
+        fprintf(log_file, '  %-8s : p = %.2f   (%d points)\n', uniq_methods{m}, -pfit(1), nnz(ok));
     end
 end
 
 fclose(log_file);
-fprintf('\nPost-processing completato. Risultati in %s\n', results_dir);
+fprintf('\nPost-processing complete. Results in %s\n', results_dir);

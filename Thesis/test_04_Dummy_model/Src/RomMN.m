@@ -1,10 +1,11 @@
 classdef RomMN < handle
-    % MACNEAL free-interface CMS con boundary massless.
-    % Riferimento: Monjaraz Tec et al., Eq. (5.3)-(5.5).
+    % ROMMN MacNeal free-interface CMS with a massless boundary.
     %
-    % IMPORTANTE: MacNeal e' un metodo INCONSISTENTE (non-Galerkin).
-    % K_r NON e' Pc'*Kc*Pc (quello sarebbe Rubin). Va costruita
-    % esplicitamente dalla flessibilita' residua.
+    % Reference: Monjaraz Tec et al., Eq. (5.3)-(5.5).
+    %
+    % IMPORTANT: MacNeal is an INCONSISTENT (non-Galerkin) method. K_r is NOT
+    % Pc'*Kc*Pc, which would be Rubin. It has to be assembled explicitly from
+    % the residual flexibility.
 
     properties
         Structure
@@ -13,10 +14,10 @@ classdef RomMN < handle
         contactDofs
         n_bnd
         M_r, K_r, C_r
-        omega2          % autovalori dei modi free-interface ritenuti
-        Phi_b           % modi ristretti al boundary
-        Fbb_res         % flessibilita' residua al boundary
-        zeta            % damping ratio modale usato
+        omega2          % Eigenvalues of the retained free-interface modes
+        Phi_b           % Modes restricted to the boundary DOFs
+        Fbb_res         % Residual flexibility at the boundary
+        zeta            % Modal damping ratios actually used
     end
 
     methods
@@ -28,15 +29,16 @@ classdef RomMN < handle
         end
 
         function build(obj, zeta_modal)
-            % zeta_modal : scalare (damping ratio uniforme) oppure vettore [m x 1].
-            %              Se omesso -> 0.
+            % BUILD Assemble the MacNeal reduced model.
+            %   zeta_modal : scalar | vector [m x 1] | struct('alpha',a,'beta',b)
+            %                Defaults to 0 if omitted.
             if nargin < 2, zeta_modal = 0; end
 
             Mc = obj.Structure.AssemblyObj.constrain_matrix(obj.Structure.M);
             Kc = obj.Structure.AssemblyObj.constrain_matrix(obj.Structure.K);
             n_dofs_c = size(Kc, 1);
 
-            % Simmetrizzazione difensiva
+            % Defensive symmetrization
             Kc = (Kc + Kc') / 2;
             Mc = (Mc + Mc') / 2;
 
@@ -46,14 +48,15 @@ classdef RomMN < handle
             inner_idx = setdiff(1:n_dofs_c, nl_dof)';
             m         = obj.numModes;
 
-            % ---------- 1. Modi normali free-interface ----------
+            % ---------- 1. Free-interface normal modes ----------
             [Phi, D] = eigs(Kc, Mc, m, 'smallestabs');
 
             if ~isreal(Phi) || ~isreal(D)
                 max_imag = max(max(abs(imag(Phi(:)))), max(abs(imag(diag(D)))));
                 if max_imag > 1e-8
                     warning('RomMN:ComplexEigs', ...
-                        'eigs ha restituito parte immaginaria %.3e. Verificare simmetria M,K.', max_imag);
+                        'eigs returned an imaginary part of %.3e. Check the symmetry of M and K.', ...
+                        max_imag);
                 end
                 Phi = real(Phi);  D = real(D);
             end
@@ -61,16 +64,16 @@ classdef RomMN < handle
             [w2, sort_idx] = sort(diag(D));
             Phi = Phi(:, sort_idx);
 
-            % ---------- 2. Guardia sui modi rigidi ----------
-            % MacNeal richiede K non singolare (serve F = inv(K)) e omega != 0.
+            % ---------- 2. Rigid body mode guard ----------
+            % MacNeal needs a non-singular K (it uses F = inv(K)) and omega != 0.
             w2_scale = max(abs(w2));
             rb_idx = find(w2 < 1e-8 * w2_scale);
             if ~isempty(rb_idx)
                 error('RomMN:RigidBodyModes', ...
-                    ['Rilevati %d modi a frequenza ~nulla (omega^2 = %.3e). ' ...
-                     'MacNeal non e'' applicabile direttamente in presenza di moti rigidi. ' ...
-                     'Rimuovere i moti rigidi o aggiungere rigidezza artificiale al boundary ' ...
-                     '(vedi Sez. 5.1.1 del paper).'], numel(rb_idx), w2(1));
+                    ['Found %d modes at near-zero frequency (omega^2 = %.3e). ' ...
+                     'MacNeal cannot be applied directly when rigid body motions are present. ' ...
+                     'Remove the rigid body motions or add artificial boundary stiffness ' ...
+                     '(see Sec. 5.1.1 of the paper).'], numel(rb_idx), w2(1));
             end
             obj.omega2 = w2;
 
@@ -79,99 +82,103 @@ classdef RomMN < handle
                 Phi(:,i) = Phi(:,i) / sqrt(Phi(:,i)' * Mc * Phi(:,i));
             end
 
-            Phi_b = Phi(nl_dof, :);      % [n_bnd x m]
-            Phi_i = Phi(inner_idx, :);   % [n_inn x m]
-            obj.Phi_b = Phi_b;
+            % Named Phi_bnd locally so it does not shadow the obj.Phi_b property.
+            Phi_bnd = Phi(nl_dof, :);    % [n_bnd x m]
+            Phi_i   = Phi(inner_idx, :); % [n_inn x m]
+            obj.Phi_b = Phi_bnd;
 
-            % ---------- 4. Attachment modes / flessibilita' ----------
-            % Colonne di F = inv(K) corrispondenti ai boundary DOF.
+            % ---------- 4. Attachment modes and flexibility ----------
+            % Columns of F = inv(K) corresponding to the boundary DOFs.
             F_int     = sparse(nl_dof, 1:obj.n_bnd, 1, n_dofs_c, obj.n_bnd);
             Flex_cols = Kc \ full(F_int);
 
             F_bb = Flex_cols(nl_dof, :);      % [n_bnd x n_bnd]
             F_ib = Flex_cols(inner_idx, :);   % [n_inn x n_bnd]
 
-            % Flessibilita' RESIDUA (Eq. 5.3): sottrai il contributo dei modi ritenuti
+            % RESIDUAL flexibility, Eq. (5.3): subtract the contribution of
+            % the modes already retained in the basis.
             inv_w2   = diag(1 ./ w2);
-            F_bb_res = F_bb - Phi_b * inv_w2 * Phi_b';
-            F_ib_res = F_ib - Phi_i * inv_w2 * Phi_b';
+            F_bb_res = F_bb - Phi_bnd * inv_w2 * Phi_bnd';
+            F_ib_res = F_ib - Phi_i   * inv_w2 * Phi_bnd';
 
-            F_bb_res = (F_bb_res + F_bb_res') / 2;   % dev'essere simmetrica
+            F_bb_res = (F_bb_res + F_bb_res') / 2;   % must be symmetric
             obj.Fbb_res = F_bb_res;
 
             rc = rcond(F_bb_res);
             fprintf('  rcond(F_bb_res) = %.3e\n', rc);
             if rc < 1e-12
                 warning('RomMN:IllConditionedFbb', ...
-                    ['F_bb_res mal condizionata (rcond = %.2e). Tipicamente significa che ' ...
-                     'numModes e'' troppo alto rispetto alla flessibilita'' residua disponibile ' ...
-                     '(i modi ritenuti hanno gia'' saturato F_bb), oppure n_bnd e'' troppo grande.'], rc);
+                    ['F_bb_res is ill-conditioned (rcond = %.2e). This usually means that ' ...
+                     'numModes is too high for the residual flexibility left (the retained ' ...
+                     'modes have already saturated F_bb), or that n_bnd is too large.'], rc);
             end
 
-            % ---------- 5. Matrice dei component modes (Eq. 5.4) ----------
+            % ---------- 5. Component mode matrix, Eq. (5.4) ----------
             T_ib = F_ib_res / F_bb_res;      % F'_ib * inv(F'_bb)
 
             Pc_matrix = zeros(n_dofs_c, obj.n_bnd + m);
             Pc_matrix(nl_dof,    1:obj.n_bnd)     = eye(obj.n_bnd);
             Pc_matrix(inner_idx, 1:obj.n_bnd)     = T_ib;
             Pc_matrix(nl_dof,    obj.n_bnd+1:end) = zeros(obj.n_bnd, m);
-            Pc_matrix(inner_idx, obj.n_bnd+1:end) = Phi_i - T_ib * Phi_b;
+            Pc_matrix(inner_idx, obj.n_bnd+1:end) = Phi_i - T_ib * Phi_bnd;
 
             obj.Pc = Pc_matrix;
             obj.P  = obj.Structure.AssemblyObj.unconstrain_vector(Pc_matrix);
 
-            % ---------- 6. Matrici ridotte (Eq. 5.5) ----------
-            % NB: costruzione ESPLICITA, non Pc'*Kc*Pc (quello sarebbe Rubin).
+            % ---------- 6. Reduced matrices, Eq. (5.5) ----------
+            % Assembled EXPLICITLY, not as Pc'*Kc*Pc, which would be Rubin.
             Fbb_inv = inv(F_bb_res);
             Fbb_inv = (Fbb_inv + Fbb_inv') / 2;
 
             K_bb_r = Fbb_inv;
-            K_bi_r = -Fbb_inv * Phi_b;
-            K_ii_r = diag(w2) + Phi_b' * Fbb_inv * Phi_b;
+            K_bi_r = -Fbb_inv * Phi_bnd;
+            K_ii_r = diag(w2) + Phi_bnd' * Fbb_inv * Phi_bnd;
 
             obj.K_r = [ K_bb_r , K_bi_r ;
                         K_bi_r', K_ii_r ];
             obj.K_r = (obj.K_r + obj.K_r') / 2;
 
-            % Massa: identita' sui modali, ZERO al boundary
+            % Mass: identity on the modal coordinates, ZERO at the boundary
             obj.M_r = zeros(obj.n_bnd + m);
             obj.M_r(obj.n_bnd+1:end, obj.n_bnd+1:end) = eye(m);
-nb = obj.n_bnd;
-Kbb_t = obj.K_r(1:nb, 1:nb);
-Kbe_t = obj.K_r(1:nb, nb+1:end);
-Kee_t = obj.K_r(nb+1:end, nb+1:end);
 
-K_cond = Kee_t - Kbe_t' * (Kbb_t \ Kbe_t);
-K_cond = (K_cond + K_cond')/2;
+            % Sanity check: statically condensing the boundary out (open
+            % contact) must reproduce the FOM frequencies.
+            nb = obj.n_bnd;
+            Kbb_t = obj.K_r(1:nb, 1:nb);
+            Kbe_t = obj.K_r(1:nb, nb+1:end);
+            Kee_t = obj.K_r(nb+1:end, nb+1:end);
 
-f_cond = sort(sqrt(abs(eig(K_cond))))/(2*pi);   % M = I sui modali
-fprintf('\n  --- ROM condensato (contatto aperto, M=I) ---\n');
-for i = 1:min(5, numel(f_cond))
-    fprintf('  f%d: ROM = %.4e | FOM = %.4e | err = %+.1f%%\n', ...
-        i, f_cond(i), obj.Structure.frequencies(i), ...
-        100*(f_cond(i)/obj.Structure.frequencies(i) - 1));
-end
-            % ---------- 7. Damping modale ----------
-            % zeta_modal puo' essere:
-            %   - scalare            -> zeta uniforme
-            %   - vettore [m x 1]    -> zeta per modo
-            %   - struct('alpha',a,'beta',b) -> Rayleigh: zeta_k = 0.5*(a/w_k + b*w_k)
+            K_cond = Kee_t - Kbe_t' * (Kbb_t \ Kbe_t);
+            K_cond = (K_cond + K_cond')/2;
+
+            f_cond = sort(sqrt(abs(eig(K_cond))))/(2*pi);   % M = I on the modal block
+            fprintf('\n  --- Condensed ROM (open contact, M = I) ---\n');
+            for i = 1:min(5, numel(f_cond))
+                fprintf('  f%d: ROM = %.4e | FOM = %.4e | err = %+.1f%%\n', ...
+                    i, f_cond(i), obj.Structure.frequencies(i), ...
+                    100*(f_cond(i)/obj.Structure.frequencies(i) - 1));
+            end
+
+            % ---------- 7. Modal damping ----------
             w = sqrt(w2);
 
             if isstruct(zeta_modal)
+                % Rayleigh: zeta_k = 0.5*(alpha/w_k + beta*w_k)
                 zvec = 0.5 * (zeta_modal.alpha ./ w + zeta_modal.beta .* w);
             elseif isscalar(zeta_modal)
                 zvec = repmat(zeta_modal, m, 1);
             else
                 zvec = zeta_modal(:);
-                assert(numel(zvec) == m, 'zeta_modal deve essere scalare, vettore [m x 1], o struct Rayleigh.');
+                assert(numel(zvec) == m, ...
+                    'zeta_modal must be a scalar, an [m x 1] vector, or a Rayleigh struct.');
             end
             obj.zeta = zvec;
 
             obj.C_r = zeros(obj.n_bnd + m);
             obj.C_r(obj.n_bnd+1:end, obj.n_bnd+1:end) = diag(2 * zvec .* w);
 
-            fprintf('  zeta: min = %.3e (modo %d), max = %.3e (modo %d)\n', ...
+            fprintf('  zeta: min = %.3e (mode %d), max = %.3e (mode %d)\n', ...
                 min(zvec), find(zvec==min(zvec),1), max(zvec), find(zvec==max(zvec),1));
         end
 
@@ -180,27 +187,27 @@ end
         end
 
         function check(obj)
-            % Diagnostica: verifica le proprieta' attese del ROM MacNeal.
+            % CHECK Verify the properties the MacNeal ROM must satisfy.
             fprintf('\n--- RomMN check ---\n');
             nb = obj.n_bnd;
 
-            % (a) La massa deve essere ESATTAMENTE [0 0; 0 I]
-            fprintf('  ||M_r(bnd,:)||       = %.3e   (atteso 0)\n', ...
+            % (a) Mass must be EXACTLY [0 0; 0 I]
+            fprintf('  ||M_r(bnd,:)||       = %.3e   (expected 0)\n', ...
                 norm(obj.M_r(1:nb,:), 'fro'));
-            fprintf('  ||M_r(inn,inn) - I|| = %.3e   (atteso 0)\n', ...
+            fprintf('  ||M_r(inn,inn) - I|| = %.3e   (expected 0)\n', ...
                 norm(obj.M_r(nb+1:end, nb+1:end) - eye(obj.numModes), 'fro'));
 
-            % (b) K_bb ridotta deve coincidere con inv(F'_bb): SPD
+            % (b) Reduced K_bb must equal inv(F'_bb), hence be SPD
             eK = eig(obj.K_r(1:nb, 1:nb));
-            fprintf('  min eig K_r(bnd,bnd) = %.3e   (atteso > 0)\n', min(eK));
+            fprintf('  min eig K_r(bnd,bnd) = %.3e   (expected > 0)\n', min(eK));
 
-            % (c) K_r globale deve essere definita positiva
+            % (c) Global K_r must be positive definite
             eKg = eig(obj.K_r);
-            fprintf('  min eig K_r globale  = %.3e   (atteso > 0)\n', min(eKg));
+            fprintf('  min eig K_r global   = %.3e   (expected > 0)\n', min(eKg));
 
-            % (d) Accoppiamento elastico bordo-interno NON deve essere nullo
-            %     (a differenza del CB standard). Se e' 0, c'e' un errore.
-            fprintf('  ||K_r(bnd,inn)||     = %.3e   (atteso > 0)\n', ...
+            % (d) Boundary-interior elastic coupling must NOT vanish, unlike
+            %     standard CB. A zero here means something went wrong.
+            fprintf('  ||K_r(bnd,inn)||     = %.3e   (expected > 0)\n', ...
                 norm(obj.K_r(1:nb, nb+1:end), 'fro'));
         end
     end
