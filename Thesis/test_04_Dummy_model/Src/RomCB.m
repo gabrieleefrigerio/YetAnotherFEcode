@@ -6,8 +6,9 @@ classdef RomCB < handle
     % retained: there is no inertial decoupling through the alpha transform,
     % and M_r(bnd,bnd) is left untouched.
     %
-    % Currently no method in test_04_main uses this class; it is kept as the
-    % consistent-mass counterpart of RomMCB.
+    % This is the Hurty/Craig-Bampton model the interface reduction literature
+    % is built on, so it is the natural target of interface_reduction(): its
+    % M_r(bnd,bnd) is SPD, which the massless variants' is not.
 
     properties
         Structure, P, Pc, numModes, contactDofs, n_bnd, M_r, K_r
@@ -17,7 +18,7 @@ classdef RomCB < handle
         function obj = RomCB(dummy_struct, num_fixed_modes, contact_dofs_constrained)
             obj.Structure = dummy_struct;
             obj.numModes = num_fixed_modes;
-            obj.contactDofs = contact_dofs_constrained;
+            obj.contactDofs = contact_dofs_constrained(:);
             obj.n_bnd = length(contact_dofs_constrained);
         end
 

@@ -14,7 +14,10 @@ classdef TransientSolverOde < handle
     %   'ContactTargetDOF'  contact DOFs (indices in the solved vector)
     %   'ContactGap'        signed gap, scalar or vector [n_c x 1]
     %   'ContactPenalty'    penalty stiffness, scalar or vector
-    %   'ModelType'         'FOM' | 'MC' | 'Rubin' | 'MCB' | 'MN'
+    %   'ModelType'         'FOM' | 'MC' | 'CB' | 'Rubin' | 'MCB' | 'MN'
+    %                       'MC' is the projected-contact path, used both by
+    %                       Milman-Chu and by any interface-reduced ROM; all
+    %                       the others index the contact DOFs directly.
     %   'ProjectionMatrix'  required by 'MC' only
     %   'Eref'              reference energy -> energy-weighted AbsTol
     %   'AbsTol'            scalar AbsTol, used when 'Eref' is not supplied
@@ -104,7 +107,7 @@ classdef TransientSolverOde < handle
             Pc_contact = [];
 
             switch upper(args.ModelType)
-                case {'FOM', 'RUBIN', 'MCB', 'MN'}
+                case {'FOM', 'CB', 'RUBIN', 'MCB', 'MN'}
                     % The interface sits at the head of the reduced vector for
                     % the CMS ROMs, so the contact DOFs are direct indices.
                     if any(strcmpi(args.ModelType, {'MCB', 'MN'}))
@@ -130,7 +133,8 @@ classdef TransientSolverOde < handle
 
                 otherwise
                     error('TSO:BadModelType', ...
-                        'Unrecognized ModelType: use FOM, MC, Rubin, MCB or MN.');
+                        'Unrecognized ModelType ''%s'': use FOM, MC, CB, Rubin, MCB or MN.', ...
+                        args.ModelType);
             end
 
             % --- tolerances ---

@@ -11,9 +11,14 @@
 %    FOM     full model, penalty contact (ode15s)
 %    MT      modal truncation, projected penalty (ode15s)
 %    MC      Milman-Chu, projected penalty (ode15s)
+%    CB      Hurty/Craig-Bampton fixed-interface CMS, penalty (ode15s)
 %    Rubin   free-interface CMS, penalty (ode15s)
 %    MCB     massless Craig-Bampton, exact set-valued contact (LCP + leapfrog)
 %    MN      massless MacNeal,       exact set-valued contact (LCP + leapfrog)
+%
+%  CB and Rubin keep the interface as physical coordinates at the head of the
+%  reduced vector, so they can take a secondary interface reduction: see
+%  cfg.interface_reduction below and Src/interface_reduction.m.
 %
 %  Results go to results/<test_name>_<timestamp>/, together with
 %  run_config.mat holding the full configuration: the post-processing reads
@@ -45,12 +50,32 @@ cfg.interfaces = { ...
 cfg.run.FOM   = 1;
 cfg.run.MT    = 1;
 cfg.run.MC    = 1;
+cfg.run.CB    = 0;
 cfg.run.Rubin = 1;
 cfg.run.MCB   = 0;
 cfg.run.MN    = 0;
 
+% --- Interface reduction (CB and Rubin only) ---
+% Secondary modal reduction of the interface partition: the n_bnd physical
+% interface DOFs are replaced by a few characteristic constraint (CC) modes.
+%   mode = 'global'         one eigenproblem on the coupled boundary partition
+%                           (Kuether et al. 2017)
+%   mode = 'per_interface'  one eigenproblem per contact face, modes pooled and
+%                           sorted by frequency (Aoyama et al. / H-CC flavour).
+%                           Localizes the basis per face, which matters when the
+%                           contact itself is localized on one face at a time.
+% When enabled, the methods eligible for it are run BOTH without reduction and
+% at every value of array_ccModes, so the baseline is always available.
+% Setting a value equal to n_bnd means no truncation: same model, but through
+% the same code path as the reduced ones. Keep it in the sweep as the control
+% point that separates the effect of the truncation from that of the change of
+% contact evaluation path (direct -> projected).
+cfg.interface_reduction.enabled = 0;
+cfg.interface_reduction.mode    = 'per_interface';
+cfg.array_ccModes               = [6, 14, 26];
+
 % --- Parameter sweeps ---
-cfg.array_linModes = [10, 50, 100, 150, 200];
+cfg.array_linModes = [50, 150, 200];
 cfg.array_QFactor  = [1000];
 cfg.array_k_mult   = [10];        % contact stiffness multiplier
                                   % (ignored by the massless models MCB/MN)
@@ -101,6 +126,10 @@ k_base     = max(diag(Kc));
 %   contact_dofs  constrained contact DOFs, concatenated
 %   gaps_array    signed gap for each of those DOFs
 %   Interfaces    metadata for the post-processing (nodes, global DOFs, coords)
+%   iface_blocks  index ranges of each face within 1:n_bnd. Since contact_dofs
+%                 is concatenated interface by interface these ranges are
+%                 contiguous, and they are what interface_reduction() needs to
+%                 build a per-face CC basis.
 labels     = cfg.interfaces(:, 1)';
 dirs       = cell2mat(cfg.interfaces(:, 2))';
 gaps_iface = cell2mat(cfg.interfaces(:, 3))';
@@ -120,8 +149,10 @@ end
 
 contact_dofs = [];
 gaps_array   = [];
+iface_blocks = {};
 Interfaces   = struct();
 nDOFPerNode  = Struct.MeshObj.nDOFPerNode;
+offset       = 0;
 
 for i = 1:numel(labels)
     lbl = labels{i};
@@ -135,7 +166,13 @@ for i = 1:numel(labels)
     contact_dofs = [contact_dofs; d];                               %#ok<AGROW>
     gaps_array   = [gaps_array;   gaps_iface(i)*ones(numel(d), 1)]; %#ok<AGROW>
 
+    % Position of this face inside the concatenated interface vector
+    block = offset + (1:numel(d));
+    iface_blocks{end+1} = block;                                    %#ok<SAGROW>
+    offset = offset + numel(d);
+
     n = Struct.get_contact_nodes(lbl);
+    Interfaces.(lbl).rom_idx  = block;
     Interfaces.(lbl).nodes    = n;
     Interfaces.(lbl).dir      = dirs(i);
     Interfaces.(lbl).gap      = gaps_iface(i);
@@ -149,7 +186,19 @@ active_labels = fieldnames(Interfaces)';
 if isempty(contact_dofs)
     error('MAIN:NoContact', 'No active contact DOF: check cfg.interfaces.');
 end
-fprintf('\nContact: %d interfaces, %d DOFs in total\n', numel(active_labels), numel(contact_dofs));
+n_bnd_total = numel(contact_dofs);
+fprintf('\nContact: %d interfaces, %d DOFs in total\n', numel(active_labels), n_bnd_total);
+
+if cfg.interface_reduction.enabled
+    bad = cfg.array_ccModes(cfg.array_ccModes < 1 | cfg.array_ccModes > n_bnd_total);
+    if ~isempty(bad)
+        error('MAIN:BadCcModes', ...
+            ['cfg.array_ccModes contains values out of range: %s. ' ...
+             'They must lie between 1 and n_bnd = %d.'], mat2str(bad), n_bnd_total);
+    end
+    fprintf('Interface reduction: %s | CC modes %s (n_bnd = %d)\n', ...
+        cfg.interface_reduction.mode, mat2str(cfg.array_ccModes), n_bnd_total);
+end
 
 %% --- 5. FORCING AND INITIAL CONDITIONS --------------------------------
 if nDOFPerNode < 2
@@ -163,8 +212,12 @@ dir_vector = zeros(n_dofs_fom, 1);
 dir_vector(1:nDOFPerNode:n_dofs_fom) = impulse_dir(1);   % X DOFs
 dir_vector(2:nDOFPerNode:n_dofs_fom) = impulse_dir(2);   % Y DOFs
 
+% The forcing is a fixed spatial vector times a scalar function of time. Keeping
+% the two factors separate lets the ROMs project the spatial part ONCE, instead
+% of redoing a dense (r x n_dofs) product at every ODE function evaluation.
 F_spatial_fom = Mc * dir_vector;
-F_fom_handle  = @(t) F_spatial_fom * impulse_amp * sin(pi*t/cfg.t_shock) * (t <= cfg.t_shock);
+shock_profile = @(t) impulse_amp * sin(pi*t/cfg.t_shock) * (t <= cfg.t_shock);
+F_fom_handle  = @(t) F_spatial_fom * shock_profile(t);
 
 q0  = zeros(n_dofs_fom, 1);
 qd0 = zeros(n_dofs_fom, 1);
@@ -185,7 +238,7 @@ fprintf('Eref = %.4e J   (v_max = %.4f m/s)\n', Eref, v_max);
 % Configuration saved once: this is the contract with the post-processing
 save(fullfile(save_dir, 'run_config.mat'), ...
     'cfg', 'Interfaces', 'active_labels', 'contact_dofs', 'gaps_array', ...
-    'Eref', 't_common', 'n_dofs_fom', 'k_base');
+    'iface_blocks', 'Eref', 't_common', 'n_dofs_fom', 'k_base');
 
 %% --- 6. FOM -----------------------------------------------------------
 if cfg.run.FOM
@@ -223,8 +276,13 @@ if cfg.run.FOM
 end
 
 %% --- 7. ROM -----------------------------------------------------------
-rom_list = {'MT', 'MC', 'Rubin', 'MCB', 'MN'};
+rom_list = {'MT', 'MC', 'CB', 'Rubin', 'MCB', 'MN'};
 rom_list = rom_list(cellfun(@(m) cfg.run.(m), rom_list) == 1);
+
+% Methods whose basis keeps the interface as physical coordinates at the head
+% of the reduced vector, and which can therefore take a secondary interface
+% reduction. The massless ones are excluded because their M_bb is zero.
+ir_eligible = {'CB', 'Rubin'};
 
 if ~isempty(rom_list)
     fprintf('\n=========================================\n');
@@ -279,6 +337,9 @@ for Q = cfg.array_QFactor
                     case 'MC'
                         rom = RomMC(Struct, phi, contact_dofs, k_contact, 1);
                         rom.build();
+                    case 'CB'
+                        rom = RomCB(Struct, phi, contact_dofs);
+                        rom.build();
                     case 'Rubin'
                         rom = RomRubin(Struct, phi, contact_dofs);
                         rom.build();
@@ -306,93 +367,189 @@ for Q = cfg.array_QFactor
                 end
                 offline_time = toc(tic_offline);
 
-                % ---------- reduced initial conditions and forcing ----------
-                if any(q0)
-                    q0_r = Pc \ q0;
+                % Spatial part of the forcing projected once. The time
+                % dependence is a scalar, so there is no need to redo this
+                % product at every ODE function evaluation.
+                F_r_spatial_full = Pc' * F_spatial_fom;
+
+                % ---------- interface reduction variants ----------
+                % n_cc = 0 is the baseline without reduction, always run so the
+                % comparison term is present in every results folder.
+                do_ir = cfg.interface_reduction.enabled && any(strcmp(model, ir_eligible));
+                if do_ir
+                    cc_list = [0, cfg.array_ccModes];
                 else
-                    q0_r = zeros(size(Pc, 2), 1);   % q0 is zero: no projection needed
+                    cc_list = 0;
                 end
-                qd0_r    = zeros(size(Pc, 2), 1);
-                F_handle = @(t) Pc' * F_fom_handle(t);
 
-                % ---------- integration ----------
-                lambda = []; info = [];
-                tic;
-                if is_massless
-                    % Exact set-valued contact (Monjaraz-Tec et al. 2022).
-                    % Solver convention: g = g0 + W'*q_b, contact when g <= 0.
-                    % With a signed gap s:  W = -diag(sign(s)),  g0 = |s|.
-                    n_bnd = rom.n_bnd;
-                    if n_bnd ~= numel(gaps_array)
-                        error('MAIN:BndMismatch', ...
-                            '%s: n_bnd = %d but there are %d contact DOFs.', ...
-                            model, n_bnd, numel(gaps_array));
-                    end
-                    W  = -diag(sign(gaps_array));
-                    g0 = abs(gaps_array);
+                for n_cc = cc_list
 
-                    solver = TransientSolverMassless(Mr, Kr, Cr, n_bnd, W, g0);
-                    [t, q_rom, lambda, info] = solver.solve( ...
-                        cfg.tmax, cfg.dt, q0_r, qd0_r, F_handle);
-
-                    % The massless solver integrates at fixed dt and knows
-                    % nothing about OutputTimes, so its output is brought back
-                    % onto the common grid. Since t_common has a step of
-                    % output_stride*dt, its instants are an EXACT subset of the
-                    % solver grid: sampling introduces no interpolation.
-                    idx    = 1 : cfg.output_stride : numel(t);
-                    t      = t(idx);
-                    q_rom  = q_rom(:, idx);
-                    lambda = lambda(:, idx);
-                    if numel(t) ~= numel(t_common) || max(abs(t - t_common)) > 1e-12*cfg.tmax
-                        warning('MAIN:GridMismatch', ...
-                            ['%s: the sampled grid (%d points) does not match t_common ' ...
-                             '(%d points). The post-processing will have to interpolate.'], ...
-                            model, numel(t), numel(t_common));
-                    end
-                else
-                    % Penalty contact with ode15s.
-                    if strcmp(model, 'Rubin')
-                        % Rubin scales the basis: gap and penalty must be
-                        % expressed in the scaled coordinates.
-                        [gaps_run, k_run] = rom.contact_params(gaps_array, k_contact);
+                    if n_cc == 0
+                        Mr_v = Mr;  Kr_v = Kr;  Cr_v = Cr;
+                        Phi_CC = [];  ir_info = [];
+                        ir_mode   = 'none';
+                        model_tag = model;
+                        F_r_spatial = F_r_spatial_full;
                     else
+                        tic_ir = tic;
+                        [Mr_v, Kr_v, Cr_v, Phi_CC, ir_info] = interface_reduction( ...
+                            Mr, Kr, Cr, rom.n_bnd, n_cc, ...
+                            cfg.interface_reduction.mode, iface_blocks);
+                        ir_mode = ir_info.mode;
+                        switch ir_mode
+                            case 'global',        model_tag = [model 'IRG'];
+                            case 'per_interface', model_tag = [model 'IRP'];
+                        end
+
+                        % T_CC' applied to the projected forcing, without forming
+                        % T_CC: it is blkdiag(Phi_CC, I).
+                        F_r_spatial = [Phi_CC' * F_r_spatial_full(1:rom.n_bnd); ...
+                                       F_r_spatial_full(rom.n_bnd+1:end)];
+                        offline_time = offline_time + toc(tic_ir);
+                    end
+
+                    fprintf('  [%s] reduced size %d\n', model_tag, size(Kr_v, 1));
+
+                    % ---------- reduced initial conditions and forcing ----------
+                    r_v = size(Kr_v, 1);
+                    if any(q0)
+                        % Only needed for a non-zero initial state; costs a full
+                        % least-squares solve, hence the guard.
+                        if n_cc == 0
+                            q0_r = Pc \ q0;
+                        else
+                            q0_r = (Pc * blkdiag(Phi_CC, eye(r_v - n_cc))) \ q0;
+                        end
+                    else
+                        q0_r = zeros(r_v, 1);
+                    end
+                    qd0_r    = zeros(r_v, 1);
+                    F_handle = @(t) F_r_spatial * shock_profile(t);
+
+                    % ---------- integration ----------
+                    lambda = []; info = [];
+                    tic;
+                    if is_massless
+                        % Exact set-valued contact (Monjaraz-Tec et al. 2022).
+                        % Solver convention: g = g0 + W'*q_b, contact when g <= 0.
+                        % With a signed gap s:  W = -diag(sign(s)),  g0 = |s|.
+                        n_bnd = rom.n_bnd;
+                        if n_bnd ~= numel(gaps_array)
+                            error('MAIN:BndMismatch', ...
+                                '%s: n_bnd = %d but there are %d contact DOFs.', ...
+                                model, n_bnd, numel(gaps_array));
+                        end
+                        W  = -diag(sign(gaps_array));
+                        g0 = abs(gaps_array);
+
+                        solver = TransientSolverMassless(Mr_v, Kr_v, Cr_v, n_bnd, W, g0);
+                        [t, q_rom, lambda, info] = solver.solve( ...
+                            cfg.tmax, cfg.dt, q0_r, qd0_r, F_handle);
+
+                        % The massless solver integrates at fixed dt and knows
+                        % nothing about OutputTimes, so its output is brought back
+                        % onto the common grid. Since t_common has a step of
+                        % output_stride*dt, its instants are an EXACT subset of the
+                        % solver grid: sampling introduces no interpolation.
+                        idx    = 1 : cfg.output_stride : numel(t);
+                        t      = t(idx);
+                        q_rom  = q_rom(:, idx);
+                        lambda = lambda(:, idx);
+                        if numel(t) ~= numel(t_common) || max(abs(t - t_common)) > 1e-12*cfg.tmax
+                            warning('MAIN:GridMismatch', ...
+                                ['%s: the sampled grid (%d points) does not match t_common ' ...
+                                 '(%d points). The post-processing will have to interpolate.'], ...
+                                model, numel(t), numel(t_common));
+                        end
+                    else
+                        % Penalty contact with ode15s.
                         gaps_run = gaps_array;
                         k_run    = k_contact;
-                    end
 
-                    if any(strcmp(model, {'MT', 'MC'}))
-                        % Projected penalty: the contact DOFs stay physical and
-                        % the solver reaches them through Pc.
-                        solver_args = {'ContactTargetDOF', contact_dofs, ...
-                                       'ModelType', 'MC', 'ProjectionMatrix', Pc};
+                        if n_cc > 0
+                            % Interface reduced: the interface is now modal, so the
+                            % contact must be evaluated in physical space through a
+                            % projection. That projection is just Phi_CC: for CB and
+                            % Rubin the contact rows of Pc are [D^-1, 0], so
+                            %   Pc(contact,:) * T_CC = [D^-1 * Phi_CC, 0]
+                            % and nothing of full size needs to be formed.
+                            Pc_bnd = Pc(contact_dofs, 1:rom.n_bnd);
+                            coupling = norm(Pc(contact_dofs, rom.n_bnd+1:end), 'fro');
+                            % Rubin leaves round-off here (~1e-11 relative) from
+                            % inverting T1_bb, so the threshold is loose enough to
+                            % ignore that while still catching a genuinely coupled
+                            % modal block, which would be O(1) relative.
+                            if coupling > 1e-8 * max(norm(Pc_bnd, 'fro'), eps)
+                                error('MAIN:InterfaceNotAtHead', ...
+                                    ['%s: the modal block of Pc is not zero at the contact rows ' ...
+                                     '(||.|| = %.3e). This ROM does not keep the interface as ' ...
+                                     'physical coordinates at the head of the basis, so the ' ...
+                                     'interface reduction cannot be applied in this form.'], ...
+                                    model, coupling);
+                            end
+                            Pc_contact_ir = [Pc_bnd * Phi_CC, zeros(numel(contact_dofs), r_v - n_cc)];
+
+                            solver_args = {'ContactTargetDOF', 1:numel(contact_dofs), ...
+                                           'ModelType', 'MC', 'ProjectionMatrix', Pc_contact_ir};
+                            % Gaps and penalty stay physical: the projected path
+                            % works in physical coordinates, so Rubin's scaling must
+                            % NOT be applied on top (it is already inside Pc).
+
+                        elseif any(strcmp(model, {'MT', 'MC'}))
+                            % Projected penalty: the contact DOFs stay physical and
+                            % the solver reaches them through Pc.
+                            solver_args = {'ContactTargetDOF', contact_dofs, ...
+                                           'ModelType', 'MC', 'ProjectionMatrix', Pc};
+                        else
+                            % CMS ROM: the interface sits at the head of the
+                            % reduced vector, so the contact DOFs are direct indices.
+                            if strcmp(model, 'Rubin')
+                                % Rubin scales the basis: gap and penalty must be
+                                % expressed in the scaled coordinates.
+                                [gaps_run, k_run] = rom.contact_params(gaps_array, k_contact);
+                            end
+                            solver_args = {'ContactTargetDOF', 1:numel(contact_dofs), ...
+                                           'ModelType', model};
+                        end
+
+                        solver = TransientSolverOde(Mr_v, Kr_v, Cr_v);
+                        [t, q_rom] = solver.solve(cfg.tmax, cfg.dt, q0_r, qd0_r, F_handle, ...
+                            solver_args{:}, ...
+                            'ContactGap',     gaps_run, ...
+                            'ContactPenalty', k_run, ...
+                            'Eref',           Eref, ...
+                            'RelTol',         cfg.RelTol, ...
+                            'OutputTimes',    t_common);
+                    end
+                    cpu_time = toc;
+
+                    % ---------- reconstruction and saving ----------
+                    % For the interface-reduced variants, go back through T_CC first
+                    % and only then through Pc. Applying blkdiag(Phi_CC, I) to the
+                    % time history is far cheaper than forming Pc*T_CC.
+                    if n_cc == 0
+                        q_rom_full = q_rom;
                     else
-                        % CMS ROM: the interface sits at the head of the
-                        % reduced vector.
-                        solver_args = {'ContactTargetDOF', 1:numel(contact_dofs), ...
-                                       'ModelType', model};
+                        q_rom_full = [Phi_CC * q_rom(1:n_cc, :); q_rom(n_cc+1:end, :)];
                     end
+                    y_contact = extract_contact_response(Struct, Interfaces, active_labels, ...
+                                                         Pc * q_rom_full);
 
-                    solver = TransientSolverOde(Mr, Kr, Cr);
-                    [t, q_rom] = solver.solve(cfg.tmax, cfg.dt, q0_r, qd0_r, F_handle, ...
-                        solver_args{:}, ...
-                        'ContactGap',     gaps_run, ...
-                        'ContactPenalty', k_run, ...
-                        'Eref',           Eref, ...
-                        'RelTol',         cfg.RelTol, ...
-                        'OutputTimes',    t_common);
-                end
-                cpu_time = toc;
+                    n_modes = phi;
+                    if n_cc == 0
+                        file_name = sprintf('ROM_%s_Phi%03d_Q%04d_K%g.mat', ...
+                                            model_tag, phi, Q, k_mult);
+                    else
+                        file_name = sprintf('ROM_%s_Phi%03d_CC%03d_Q%04d_K%g.mat', ...
+                                            model_tag, phi, n_cc, Q, k_mult);
+                    end
+                    save(fullfile(save_dir, file_name), ...
+                        't', 'y_contact', 'Interfaces', 'cpu_time', 'offline_time', ...
+                        'model', 'model_tag', 'n_modes', 'Q', 'k_mult', 'lambda', 'info', ...
+                        'n_cc', 'ir_mode', 'ir_info');
 
-                % ---------- reconstruction and saving ----------
-                y_contact = extract_contact_response(Struct, Interfaces, active_labels, Pc * q_rom);
-
-                n_modes = phi;
-                save(fullfile(save_dir, ...
-                        sprintf('ROM_%s_Phi%03d_Q%04d_K%g.mat', model, phi, Q, k_mult)), ...
-                    't', 'y_contact', 'Interfaces', 'cpu_time', 'offline_time', ...
-                    'model', 'n_modes', 'Q', 'k_mult', 'lambda', 'info');
-            end
+                end   % n_cc
+            end   % im (rom_list)
         end
     end
 end

@@ -12,6 +12,8 @@
 %    - GRE_Results.txt      text log
 %    - summary_<mode>.csv   summary table
 %    - Summary_GRE_vs_phi   error convergence against the number of modes
+%    - Summary_GRE_vs_ncc   error vs interface basis size, when interface
+%                           reduction was used (Kuether et al. 2017, Table 2)
 %    - Summary_Pareto       accuracy / online cost trade-off
 %
 %  No interpolation: every model is stored on the same t_common grid. If a
@@ -111,7 +113,10 @@ fprintf(log_file, ' Reference metric: %s (window %.0f%%)\n', gre_tag, 100*win_fr
 fprintf(log_file, ' Integration floor: %.2e %%\n', gre_floor_pct);
 fprintf(log_file, ' Eref = %.4e J\n\n', R.Eref);
 
-summary = struct('method', {}, 'phi', {}, 'Q', {}, 'K', {}, ...
+% n_cc = 0 marks a run without interface reduction; ir_mode says which CC
+% variant produced the reduced ones ('global' or 'per_interface').
+summary = struct('method', {}, 'phi', {}, 'n_cc', {}, 'ir_mode', {}, ...
+                 'Q', {}, 'K', {}, ...
                  'gre_full', {}, 'gre_win', {}, 'gre_ref', {}, ...
                  'cpu', {}, 'offline', {});
 
@@ -227,6 +232,16 @@ for i_fom = 1:numel(fom_files)
             if isfield(rom, 'cpu_time'),     rom_cpu = rom.cpu_time;     else, rom_cpu = NaN; end
             if isfield(rom, 'offline_time'), rom_off = rom.offline_time; else, rom_off = NaN; end
 
+            % Interface reduction: absent from the file or from the name means
+            % this run had none.
+            if isfield(rom, 'n_cc')
+                n_cc_val = rom.n_cc;
+            else
+                ct = regexp(sel_files(i_rom).name, 'CC(\d+)', 'tokens', 'once');
+                if isempty(ct), n_cc_val = 0; else, n_cc_val = str2double(ct{1}); end
+            end
+            if isfield(rom, 'ir_mode'), ir_mode_val = rom.ir_mode; else, ir_mode_val = 'none'; end
+
             % --- all contact DOFs concatenated, across every interface ---
             y_fom_cat = [];
             y_rom_cat = [];
@@ -256,11 +271,17 @@ for i_fom = 1:numel(fom_files)
                     time_info = sprintf('%s, On: %.2fs', time_info, rom_cpu);
                 end
             end
-            if isempty(time_info)
-                legend_str = sprintf('ROM \\phi=%d (%s: %.3f%%)', phi_val, gre_tag_tex, gre_ref);
+            if n_cc_val > 0
+                cc_tag = sprintf(', n_{cc}=%d', n_cc_val);
             else
-                legend_str = sprintf('ROM \\phi=%d (%s: %.3f%%, %s)', ...
-                    phi_val, gre_tag_tex, gre_ref, time_info);
+                cc_tag = '';
+            end
+            if isempty(time_info)
+                legend_str = sprintf('ROM \\phi=%d%s (%s: %.3f%%)', ...
+                    phi_val, cc_tag, gre_tag_tex, gre_ref);
+            else
+                legend_str = sprintf('ROM \\phi=%d%s (%s: %.3f%%, %s)', ...
+                    phi_val, cc_tag, gre_tag_tex, gre_ref, time_info);
             end
 
             for f = 1:n_faces
@@ -277,6 +298,7 @@ for i_fom = 1:numel(fom_files)
                 'LineWidth', 1.5, 'HandleVisibility', 'off');
 
             summary(end+1) = struct('method', method, 'phi', phi_val, ...
+                'n_cc', n_cc_val, 'ir_mode', ir_mode_val, ...
                 'Q', Q_val, 'K', K_val, 'gre_full', gre_full, 'gre_win', gre_win, ...
                 'gre_ref', gre_ref, 'cpu', rom_cpu, 'offline', rom_off); %#ok<SAGROW>
 
@@ -290,10 +312,11 @@ for i_fom = 1:numel(fom_files)
             end
             % Both metrics are always shown; which one is the reference is
             % stated in the header and is the one used in the summaries.
-            fprintf('  [%-6s] Phi %3d | GRE_full %9.4f%% | GRE_win %9.4f%% | Off %s | On %s%s\n', ...
-                method, phi_val, gre_full, gre_win, off_str, on_str, flag);
-            fprintf(log_file, '  %-6s Phi %03d | GRE_full %9.4f%% | GRE_win %9.4f%% | Off %s | On %s%s\n', ...
-                method, phi_val, gre_full, gre_win, off_str, on_str, flag);
+            if n_cc_val > 0, cc_str = sprintf('%3d', n_cc_val); else, cc_str = '  -'; end
+            fprintf('  [%-9s] Phi %3d | CC %s | GRE_full %9.4f%% | GRE_win %9.4f%% | Off %s | On %s%s\n', ...
+                method, phi_val, cc_str, gre_full, gre_win, off_str, on_str, flag);
+            fprintf(log_file, '  %-9s Phi %03d | CC %s | GRE_full %9.4f%% | GRE_win %9.4f%% | Off %s | On %s%s\n', ...
+                method, phi_val, cc_str, gre_full, gre_win, off_str, on_str, flag);
         end
 
         legend(axs(1), 'Location', 'best');
@@ -322,10 +345,14 @@ uniq_methods = unique(T_summary.method, 'stable');
 mk = {'o-','s-','^-','d-','v-','>-'};
 
 % --- Figure A: GRE convergence against the number of modes ---
+% Restricted to runs without interface reduction, so that phi is the only
+% parameter varying along each curve. The reduced ones get their own figure.
+base_rows = T_summary.n_cc == 0;
 figA = figure('Name','Convergence in phi','Color','w','Position',[100 100 800 600]);
 hold on; grid on;
 for m = 1:numel(uniq_methods)
-    sel = strcmp(T_summary.method, uniq_methods{m});
+    sel = strcmp(T_summary.method, uniq_methods{m}) & base_rows;
+    if ~any(sel), continue; end
     [phis, iord] = sort(T_summary.phi(sel));
     g = T_summary.gre_ref(sel);
     plot(phis, g(iord), mk{min(m,numel(mk))}, 'LineWidth', 1.8, ...
@@ -361,11 +388,61 @@ exportgraphics(figB, fullfile(results_dir, ...
     sprintf('Summary_Pareto_%s.png', lower(gre_mode))), 'Resolution', 300);
 savefig(figB, fullfile(results_dir, sprintf('Summary_Pareto_%s.fig', lower(gre_mode))));
 
+% --- Figure C: GRE against the number of interface (CC) modes ---
+% The equivalent of Table 2 in Kuether et al. 2017: how far the interface can
+% be truncated before accuracy degrades. One curve per (method, phi) pair, so
+% that the two CC variants (global vs per_interface) can be read side by side.
+ir_rows = T_summary.n_cc > 0;
+if any(ir_rows)
+    figC = figure('Name','Convergence in n_cc','Color','w','Position',[100 100 800 600]);
+    hold on; grid on;
+
+    ir_methods = unique(T_summary.method(ir_rows), 'stable');
+    ir_phis    = unique(T_summary.phi(ir_rows));
+    ic = 0;
+    for m = 1:numel(ir_methods)
+        for p = 1:numel(ir_phis)
+            sel = ir_rows & strcmp(T_summary.method, ir_methods{m}) & ...
+                  T_summary.phi == ir_phis(p);
+            if nnz(sel) < 2, continue; end
+            ic = ic + 1;
+            [ccs, iord] = sort(T_summary.n_cc(sel));
+            g = T_summary.gre_ref(sel);
+            plot(ccs, g(iord), mk{mod(ic-1,numel(mk))+1}, 'LineWidth', 1.8, ...
+                'MarkerSize', 7, 'DisplayName', ...
+                sprintf('%s, \\phi=%d', ir_methods{m}, ir_phis(p)));
+        end
+    end
+
+    % Reference: the same methods without interface reduction. Any CC curve
+    % that reaches this level has lost nothing to the interface truncation.
+    for m = 1:numel(ir_methods)
+        base_name = regexprep(ir_methods{m}, 'IR[GP]$', '');
+        sel = base_rows & strcmp(T_summary.method, base_name);
+        if any(sel)
+            yline(min(T_summary.gre_ref(sel)), 'k--', 'LineWidth', 1.2, ...
+                'DisplayName', sprintf('%s, no IR (best)', base_name));
+        end
+    end
+
+    yline(gre_floor_pct, 'r--', 'LineWidth', 1.5, 'DisplayName', 'Integration floor');
+    set(gca, 'XScale', 'log', 'YScale', 'log');
+    xlabel('Number of retained interface (CC) modes n_{cc}');
+    ylabel(gre_desc);
+    title('Interface reduction: error vs interface basis size');
+    legend('Location','best'); box on;
+    exportgraphics(figC, fullfile(results_dir, ...
+        sprintf('Summary_GRE_vs_ncc_%s.png', lower(gre_mode))), 'Resolution', 300);
+    savefig(figC, fullfile(results_dir, sprintf('Summary_GRE_vs_ncc_%s.fig', lower(gre_mode))));
+end
+
 %% --- 6. Observed convergence order ------------------------------------
 fprintf('\n--- Observed convergence order (%s ~ phi^-p) ---\n', gre_tag);
 fprintf(log_file, '\n--- Observed convergence order (%s ~ phi^-p) ---\n', gre_tag);
 for m = 1:numel(uniq_methods)
-    sel  = strcmp(T_summary.method, uniq_methods{m});
+    % Only the runs without interface reduction: with IR, phi is fixed along a
+    % curve and n_cc is what varies, so a fit in phi would be meaningless.
+    sel  = strcmp(T_summary.method, uniq_methods{m}) & base_rows;
     phis = T_summary.phi(sel);
     g    = T_summary.gre_ref(sel);
     ok   = phis > 0 & g > 0;
