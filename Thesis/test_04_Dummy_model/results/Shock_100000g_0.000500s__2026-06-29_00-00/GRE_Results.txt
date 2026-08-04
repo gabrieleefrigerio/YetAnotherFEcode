@@ -1,0 +1,26 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & TIME REPORT
+======================================================
+
+>>> CASE: Q = 1000 | K_mult = 10 <<<
+  MCB   Phi: 010 | GRE Node 1: 102.467% | GRE All Nodes: 102.511% | Off:  0.05s | On:  1.93s
+  MCB   Phi: 020 | GRE Node 1: 102.181% | GRE All Nodes: 102.227% | Off:  0.03s | On:  2.33s
+  MCB   Phi: 050 | GRE Node 1: 100.780% | GRE All Nodes: 100.792% | Off:  0.05s | On:  2.57s
+  MCB   Phi: 070 | GRE Node 1: 100.593% | GRE All Nodes: 100.603% | Off:  0.06s | On:  2.61s
+  MCB   Phi: 100 | GRE Node 1: 100.504% | GRE All Nodes: 100.512% | Off:  0.10s | On:  4.07s
+  MC    Phi: 010 | GRE Node 1: 12.115% | GRE All Nodes: 15.380% | Off:  0.07s | On: 13.22s
+  MC    Phi: 020 | GRE Node 1: 28.625% | GRE All Nodes: 22.773% | Off:  0.09s | On: 13.41s
+  MC    Phi: 050 | GRE Node 1:  1.026% | GRE All Nodes:  0.828% | Off:  0.16s | On: 17.80s
+  MC    Phi: 070 | GRE Node 1:  3.452% | GRE All Nodes:  2.355% | Off:  0.22s | On: 22.62s
+  MC    Phi: 100 | GRE Node 1:  2.558% | GRE All Nodes:  3.168% | Off:  0.33s | On: 31.40s
+  MN    Phi: 010 | GRE Node 1: 205.896% | GRE All Nodes: 189.253% | Off:  0.02s | On:  2.66s
+  MN    Phi: 020 | GRE Node 1: 58.462% | GRE All Nodes: 54.109% | Off:  0.04s | On:  2.63s
+  MN    Phi: 050 | GRE Node 1: 30.715% | GRE All Nodes: 26.005% | Off:  0.07s | On:  3.92s
+  MN    Phi: 070 | GRE Node 1:  9.051% | GRE All Nodes:  8.263% | Off:  0.08s | On:  4.27s
+  MN    Phi: 100 | GRE Node 1:  7.040% | GRE All Nodes:  6.572% | Off:  0.12s | On:  5.73s
+  Rubin Phi: 010 | GRE Node 1: 11.828% | GRE All Nodes: 14.697% | Off:  0.05s | On: 16.28s
+  Rubin Phi: 020 | GRE Node 1:  9.254% | GRE All Nodes:  8.853% | Off:  0.05s | On: 11.38s
+  Rubin Phi: 050 | GRE Node 1:  2.027% | GRE All Nodes:  1.653% | Off:  0.07s | On: 13.98s
+  Rubin Phi: 070 | GRE Node 1:  0.515% | GRE All Nodes:  0.418% | Off:  0.09s | On: 17.43s
+  Rubin Phi: 100 | GRE Node 1:  0.270% | GRE All Nodes:  0.218% | Off:  0.18s | On: 22.63s
+

@@ -1,0 +1,40 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & CPU TIME REPORT
+======================================================
+
+>>> CASE: Q = 1000 | K_mult = 0.1 <<<
+  MC    Phi: 010 | GRE Node 1: 27.723% | GRE All Nodes: 25.423% | CPU: 16.35s
+  MC    Phi: 020 | GRE Node 1:  7.535% | GRE All Nodes:  6.677% | CPU: 16.59s
+  MC    Phi: 050 | GRE Node 1:  0.078% | GRE All Nodes:  0.070% | CPU: 25.28s
+  MC    Phi: 070 | GRE Node 1:  0.019% | GRE All Nodes:  0.014% | CPU: 30.89s
+  MC    Phi: 100 | GRE Node 1:  0.024% | GRE All Nodes:  0.018% | CPU: 42.28s
+  Rubin Phi: 010 | GRE Node 1: 29.038% | GRE All Nodes: 26.264% | CPU: 8.62s
+  Rubin Phi: 020 | GRE Node 1:  6.298% | GRE All Nodes:  5.741% | CPU: 8.95s
+  Rubin Phi: 050 | GRE Node 1:  0.037% | GRE All Nodes:  0.033% | CPU: 12.81s
+  Rubin Phi: 070 | GRE Node 1:  0.119% | GRE All Nodes:  0.108% | CPU: 17.50s
+  Rubin Phi: 100 | GRE Node 1:  0.087% | GRE All Nodes:  0.078% | CPU: 22.33s
+
+>>> CASE: Q = 1000 | K_mult = 1 <<<
+  MC    Phi: 010 | GRE Node 1: 41.081% | GRE All Nodes: 28.674% | CPU: 15.48s
+  MC    Phi: 020 | GRE Node 1:  8.757% | GRE All Nodes:  8.121% | CPU: 15.94s
+  MC    Phi: 050 | GRE Node 1:  8.384% | GRE All Nodes:  7.797% | CPU: 22.45s
+  MC    Phi: 070 | GRE Node 1:  0.638% | GRE All Nodes:  0.497% | CPU: 27.27s
+  MC    Phi: 100 | GRE Node 1:  0.383% | GRE All Nodes:  0.329% | CPU: 35.03s
+  Rubin Phi: 010 | GRE Node 1: 48.527% | GRE All Nodes: 32.796% | CPU: 9.98s
+  Rubin Phi: 020 | GRE Node 1:  1.436% | GRE All Nodes:  1.138% | CPU: 10.01s
+  Rubin Phi: 050 | GRE Node 1:  6.635% | GRE All Nodes:  7.217% | CPU: 14.62s
+  Rubin Phi: 070 | GRE Node 1:  0.496% | GRE All Nodes:  0.389% | CPU: 18.55s
+  Rubin Phi: 100 | GRE Node 1:  0.071% | GRE All Nodes:  0.076% | CPU: 26.80s
+
+>>> CASE: Q = 1000 | K_mult = 10 <<<
+  MC    Phi: 010 | GRE Node 1: 13.913% | GRE All Nodes: 17.459% | CPU: 19.23s
+  MC    Phi: 020 | GRE Node 1: 26.434% | GRE All Nodes: 20.339% | CPU: 27.48s
+  MC    Phi: 050 | GRE Node 1:  1.849% | GRE All Nodes:  1.574% | CPU: 35.12s
+  MC    Phi: 070 | GRE Node 1:  1.298% | GRE All Nodes:  0.958% | CPU: 28.64s
+  MC    Phi: 100 | GRE Node 1:  1.810% | GRE All Nodes:  1.204% | CPU: 44.31s
+  Rubin Phi: 010 | GRE Node 1: 10.737% | GRE All Nodes: 13.988% | CPU: 19.55s
+  Rubin Phi: 020 | GRE Node 1:  9.162% | GRE All Nodes:  8.773% | CPU: 16.46s
+  Rubin Phi: 050 | GRE Node 1:  0.902% | GRE All Nodes:  0.792% | CPU: 19.21s
+  Rubin Phi: 070 | GRE Node 1:  0.518% | GRE All Nodes:  0.423% | CPU: 24.01s
+  Rubin Phi: 100 | GRE Node 1:  0.193% | GRE All Nodes:  0.142% | CPU: 41.29s
+

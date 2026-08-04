@@ -1,0 +1,11 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & CPU TIME REPORT
+======================================================
+
+>>> CASE: Q = 1000 | K_mult = 10 <<<
+  MN    Phi: 010 | GRE Node 1: 35.883% | GRE All Nodes: 49.635% | CPU: 10.77s
+  MN    Phi: 020 | GRE Node 1: 17.549% | GRE All Nodes: 15.032% | CPU: 9.24s
+  MN    Phi: 050 | GRE Node 1:  3.548% | GRE All Nodes:  5.196% | CPU: 12.44s
+  MN    Phi: 070 | GRE Node 1:  6.358% | GRE All Nodes:  4.909% | CPU: 17.57s
+  MN    Phi: 100 | GRE Node 1:  6.633% | GRE All Nodes:  4.914% | CPU: 22.75s
+

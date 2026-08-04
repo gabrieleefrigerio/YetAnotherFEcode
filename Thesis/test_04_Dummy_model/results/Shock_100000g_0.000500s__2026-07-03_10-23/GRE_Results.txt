@@ -1,0 +1,17 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & TIME REPORT
+======================================================
+
+>>> CASE: Q = 1000 | K_mult = 1 <<<
+
+>>> CASE: Q = 1000 | K_mult = 10 <<<
+  MCB   Phi: 010 | GRE Node 1: 86.349% | GRE All Nodes: 100.388% | Off:  0.34s | On:  4.17s
+  MCB   Phi: 020 | GRE Node 1: 74.893% | GRE All Nodes: 89.039% | Off:  0.13s | On:  5.53s
+  MCB   Phi: 050 | GRE Node 1: 36.206% | GRE All Nodes: 38.400% | Off:  0.12s | On:  8.97s
+  MCB   Phi: 070 | GRE Node 1: 36.993% | GRE All Nodes: 37.317% | Off:  0.18s | On: 13.57s
+  MCB   Phi: 100 | GRE Node 1: 654.867% | GRE All Nodes: 607.648% | Off:  0.24s | On:  5.83s
+  MC    Phi: 010 | GRE Node 1: 20.845% | GRE All Nodes: 26.832% | Off:  0.14s | On: 191.59s
+  MC    Phi: 020 | GRE Node 1: 20.275% | GRE All Nodes: 18.910% | Off:  0.13s | On:  6.95s
+  MC    Phi: 050 | GRE Node 1: 19.995% | GRE All Nodes: 25.588% | Off:  0.44s | On: 13.28s
+  MC    Phi: 070 | GRE Node 1:  7.943% | GRE All Nodes:  8.033% | Off:  0.53s | On: 16.51s
+  MC    Phi: 100 | GRE Node 1: 19.672% | GRE All Nodes: 25.064% | Off:  0.49s | On: 26.65s

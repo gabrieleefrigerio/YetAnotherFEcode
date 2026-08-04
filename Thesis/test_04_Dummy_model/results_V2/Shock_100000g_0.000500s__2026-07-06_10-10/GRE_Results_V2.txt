@@ -1,0 +1,26 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & TIME REPORT
+======================================================
+
+>>> CASE: Q = 1000 | K_mult = 10 <<<
+  Milman-Chu Phi: 010 | Avg GRE: 71.656% | Off:  0.80s | On:  6.66s
+  Milman-Chu Phi: 050 | Avg GRE: 73.599% | Off:  0.71s | On: 20.10s
+  Milman-Chu Phi: 100 | Avg GRE: 74.762% | Off:  0.63s | On: 34.97s
+  Milman-Chu Phi: 150 | Avg GRE: 82.109% | Off:  1.58s | On: 58.95s
+  Milman-Chu Phi: 200 | Avg GRE: 79.267% | Off:  2.22s | On: 79.62s
+  Rubin Phi: 010 | Avg GRE: 86.069% | Off:  0.21s | On:  4.01s
+  Rubin Phi: 050 | Avg GRE: 72.896% | Off:  0.18s | On: 14.82s
+  Rubin Phi: 100 | Avg GRE: 31.233% | Off:  0.23s | On: 23.92s
+  Rubin Phi: 150 | Avg GRE: 54.871% | Off:  0.57s | On: 36.96s
+  Rubin Phi: 200 | Avg GRE:  1.722% | Off:  1.00s | On: 57.10s
+  Massless CB Phi: 010 | Avg GRE: 104.570% | Off:  0.66s | On:  4.52s
+  Massless CB Phi: 050 | Avg GRE: 74.207% | Off:  0.22s | On: 12.16s
+  Massless CB Phi: 100 | Avg GRE: 71.812% | Off:  0.34s | On: 23.84s
+  Massless CB Phi: 150 | Avg GRE: 70.242% | Off:  0.55s | On: 38.77s
+  Massless CB Phi: 200 | Avg GRE: 71.233% | Off:  1.04s | On: 50.66s
+  MacNeal Phi: 010 | Avg GRE: 95.053% | Off:  0.19s | On:  5.25s
+  MacNeal Phi: 050 | Avg GRE: 3732.151% | Off:  0.17s | On:  0.72s
+  MacNeal Phi: 100 | Avg GRE: 83.961% | Off:  0.20s | On: 22.76s
+  MacNeal Phi: 150 | Avg GRE: 80.506% | Off:  0.57s | On: 34.98s
+  MacNeal Phi: 200 | Avg GRE: 31.863% | Off:  1.07s | On: 45.54s
+

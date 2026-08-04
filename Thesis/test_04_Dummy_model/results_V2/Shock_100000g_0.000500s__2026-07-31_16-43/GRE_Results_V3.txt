@@ -1,0 +1,24 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & TIME REPORT - V3
+======================================================
+ Finestra di validita': primo 25% della simulazione
+ Floor di integrazione: 3.00e-05 %
+ Metrica di riferimento: GRE_full (modalita' 'full')
+
+>>> CASE: Q = 1000 | K_mult = 10 <<<
+  Modal Truncation Phi: 010 | GRE_full: 100.8199% | GRE_full: 100.8199% | Off:   0.03s | On:   4.26s
+  Modal Truncation Phi: 050 | GRE_full:  89.0877% | GRE_full:  89.0877% | Off:   0.10s | On:   8.18s
+  Modal Truncation Phi: 100 | GRE_full:  91.0740% | GRE_full:  91.0740% | Off:   0.27s | On:  26.54s
+  Modal Truncation Phi: 150 | GRE_full:  77.8826% | GRE_full:  77.8826% | Off:   0.62s | On:  46.68s
+  Modal Truncation Phi: 200 | GRE_full:  88.3764% | GRE_full:  88.3764% | Off:   1.21s | On:  71.10s
+  Milman-Chu       Phi: 010 | GRE_full:  86.4951% | GRE_full:  86.4951% | Off:   0.07s | On:   7.88s
+  Milman-Chu       Phi: 050 | GRE_full:  44.0096% | GRE_full:  44.0096% | Off:   0.16s | On:  20.70s
+  Milman-Chu       Phi: 100 | GRE_full:  13.5597% | GRE_full:  13.5597% | Off:   0.39s | On:  40.17s
+  Milman-Chu       Phi: 150 | GRE_full:   7.6515% | GRE_full:   7.6515% | Off:   0.84s | On:  57.21s
+  Milman-Chu       Phi: 200 | GRE_full:   0.3970% | GRE_full:   0.3970% | Off:   1.48s | On:  80.00s
+  Rubin            Phi: 010 | GRE_full:  86.5115% | GRE_full:  86.5115% | Off:   0.05s | On:   4.97s
+  Rubin            Phi: 050 | GRE_full:  44.0101% | GRE_full:  44.0101% | Off:   0.08s | On:  13.45s
+  Rubin            Phi: 100 | GRE_full:  13.5625% | GRE_full:  13.5625% | Off:   0.15s | On:  26.64s
+  Rubin            Phi: 150 | GRE_full:   7.6647% | GRE_full:   7.6647% | Off:   0.30s | On:  36.16s
+  Rubin            Phi: 200 | GRE_full:   0.3951% | GRE_full:   0.3951% | Off:   0.54s | On:  52.70s
+

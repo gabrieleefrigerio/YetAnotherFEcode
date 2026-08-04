@@ -1,0 +1,14 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & TIME REPORT - V3
+======================================================
+ Finestra di validita': primo 25% della simulazione
+ Floor di integrazione: 3.00e-05 %
+ Metrica di riferimento: GRE_full (modalita' 'full')
+
+>>> CASE: Q = 1000 | K_mult = 10 <<<
+  Milman-Chu       Phi: 200 | GRE_full:   0.3970% | GRE_full:   0.3970% | Off:   1.38s | On:  87.14s
+  Rubin            Phi: 200 | GRE_full:   0.3891% | GRE_full:   0.3891% | Off:   0.57s | On: 108.11s
+  Rubin            Phi: 200 | GRE_full:   0.3919% | GRE_full:   0.3919% | Off:   0.57s | On: 108.35s
+  Rubin            Phi: 200 | GRE_full:   0.3947% | GRE_full:   0.3947% | Off:   0.57s | On:  59.89s
+  Rubin            Phi: 200 | GRE_full:   0.3947% | GRE_full:   0.3947% | Off:   0.57s | On:  59.16s
+

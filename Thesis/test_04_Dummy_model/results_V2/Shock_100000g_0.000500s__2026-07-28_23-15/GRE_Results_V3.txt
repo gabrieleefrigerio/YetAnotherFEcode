@@ -1,0 +1,11 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & TIME REPORT - V3
+======================================================
+ Finestra di validita': primo 25% della simulazione
+ Floor di integrazione: 3.00e-05 %
+
+>>> CASE: Q = 1000 | K_mult = 10 <<<
+  Modal Truncation Phi: 200 | GRE_win:  27.7722% | GRE_full:  88.3736% | Off:   1.82s | On: 113.04s
+  Milman-Chu       Phi: 200 | GRE_win:   0.0026% | GRE_full:   0.3969% | Off:   2.22s | On: 122.29s  [!] vicino al floor di integrazione
+  Rubin            Phi: 200 | GRE_win:   0.0026% | GRE_full:   0.3931% | Off:   0.97s | On: 148.54s  [!] vicino al floor di integrazione
+

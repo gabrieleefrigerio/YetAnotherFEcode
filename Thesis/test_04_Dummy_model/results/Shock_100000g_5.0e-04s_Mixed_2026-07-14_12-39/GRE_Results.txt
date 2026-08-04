@@ -1,0 +1,11 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & TIME REPORT
+======================================================
+
+>>> CASE: Q = 1000 | K_mult = 1000 <<<
+  MN    Phi: 010 | GRE Node 1: 260.403% | GRE All Nodes: 240.641% | Off:  0.31s | On:  2.18s
+  MN    Phi: 020 | GRE Node 1: 58.320% | GRE All Nodes: 55.547% | Off:  0.05s | On:  2.01s
+  MN    Phi: 050 | GRE Node 1: 29.800% | GRE All Nodes: 25.084% | Off:  0.07s | On:  2.33s
+  MN    Phi: 070 | GRE Node 1:  9.158% | GRE All Nodes:  8.557% | Off:  0.07s | On:  2.56s
+  MN    Phi: 100 | GRE Node 1:  7.210% | GRE All Nodes:  6.752% | Off:  0.11s | On:  2.96s
+
