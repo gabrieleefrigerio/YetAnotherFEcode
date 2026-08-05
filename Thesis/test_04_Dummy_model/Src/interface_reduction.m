@@ -1,7 +1,7 @@
-function [Mr2, Kr2, Cr2, Phi_CC, info] = interface_reduction(Mr, Kr, Cr, n_bnd, n_cc, mode, iface_blocks)
+function [Mr2, Kr2, Cr2, Phi_CC, info] = interface_reduction(Mr, Kr, Cr, n_bnd, n_cc, mode, iface_blocks, pencil)
 %INTERFACE_REDUCTION Secondary modal reduction of the interface partition of a CMS ROM.
 %
-%   [Mr2, Kr2, Cr2, Phi_CC, info] = INTERFACE_REDUCTION(Mr, Kr, Cr, n_bnd, n_cc, mode, iface_blocks)
+%   [Mr2, Kr2, Cr2, Phi_CC, info] = INTERFACE_REDUCTION(Mr, Kr, Cr, n_bnd, n_cc, mode, iface_blocks, pencil)
 %
 %   Applies to ROMs whose reduced basis keeps the interface as physical
 %   coordinates at the HEAD of the vector, i.e. q = [x_b ; q_modal] with
@@ -29,6 +29,21 @@ function [Mr2, Kr2, Cr2, Phi_CC, info] = interface_reduction(Mr, Kr, Cr, n_bnd, 
 %                                  and the n_cc lowest are kept
 %     iface_blocks cell array of index vectors into 1:n_bnd, one per contact
 %                  face. Required by 'per_interface', ignored by 'global'.
+%     pencil       optional struct('K',K_bb,'M',M_bb) giving the pencil the CC
+%                  modes are computed from, EXPRESSED IN THE ROM's INTERFACE
+%                  COORDINATES. Omit or leave empty to use the boundary
+%                  partition of Mr/Kr themselves.
+%
+%                  The CC modes are only a Ritz basis for the interface
+%                  displacement, so any full-rank choice is admissible and the
+%                  choice affects accuracy alone. Taking them from a Guyan
+%                  condensation of the structure (see guyan_interface_pencil)
+%                  rather than from the ROM's own boundary block makes the basis
+%                  a property of the interface instead of the reduction method.
+%                  That matters for Rubin, whose interface block is spanned by
+%                  residual attachment modes and therefore has no low-frequency
+%                  content: truncating it produces a subspace nearly orthogonal
+%                  to the interface motion the dynamics actually produces.
 %
 %   Outputs
 %     Mr2, Kr2, Cr2  interface-reduced matrices, size (n_cc + m)
@@ -65,8 +80,25 @@ if n_cc < 1 || n_cc > n_bnd
 end
 
 ib = 1:n_bnd;
-K_bb = full(Kr(ib, ib));  K_bb = (K_bb + K_bb') / 2;
-M_bb = full(Mr(ib, ib));  M_bb = (M_bb + M_bb') / 2;
+if nargin >= 8 && ~isempty(pencil)
+    % Externally supplied pencil (e.g. the Guyan condensation of the structure),
+    % already expressed in the ROM's interface coordinates by the caller.
+    basis_src = 'guyan';
+    K_bb = full(pencil.K);
+    M_bb = full(pencil.M);
+    if ~isequal(size(K_bb), [n_bnd n_bnd]) || ~isequal(size(M_bb), [n_bnd n_bnd])
+        error('IR:BadPencil', ...
+            'The supplied pencil must be %dx%d, got K %s and M %s.', ...
+            n_bnd, n_bnd, mat2str(size(K_bb)), mat2str(size(M_bb)));
+    end
+else
+    % Boundary partition of the ROM being reduced (Kuether et al. 2017).
+    basis_src = 'self';
+    K_bb = full(Kr(ib, ib));
+    M_bb = full(Mr(ib, ib));
+end
+K_bb = (K_bb + K_bb') / 2;
+M_bb = (M_bb + M_bb') / 2;
 
 % The secondary eigenproblem needs M_bb positive definite. A Cholesky attempt
 % is the direct test; comparing norms of M_bb against K_bb would be comparing
@@ -108,11 +140,11 @@ Cr2 = T_CC' * Cr * T_CC;   Cr2 = (Cr2 + Cr2') / 2;
 
 % ---------- report ----------
 f_cc = sqrt(max(w2, 0)) / (2*pi);
-info = struct('mode', lower(mode), 'n_cc', n_cc, 'n_bnd', n_bnd, ...
+info = struct('mode', lower(mode), 'basis', basis_src, 'n_cc', n_cc, 'n_bnd', n_bnd, ...
               'f_cc', f_cc, 'modes_per_face', modes_per_face);
 
-fprintf('  [IR] %s | %d/%d interface DOFs retained | CC freq %.3e - %.3e Hz\n', ...
-    lower(mode), n_cc, n_bnd, f_cc(1), f_cc(end));
+fprintf('  [IR] %s / %s basis | %d/%d interface DOFs retained | CC freq %.3e - %.3e Hz\n', ...
+    lower(mode), basis_src, n_cc, n_bnd, f_cc(1), f_cc(end));
 if ~isempty(modes_per_face)
     fprintf('  [IR] modes per face: %s\n', mat2str(modes_per_face));
 end

@@ -47,10 +47,10 @@ cfg.interfaces = { ...
     'R', 1,  1.5e-6 };      % wall on the positive X side
 
 % --- Methods to run ---
-cfg.run.FOM   = 1;
-cfg.run.MT    = 1;
-cfg.run.MC    = 1;
-cfg.run.CB    = 0;
+cfg.run.FOM   = 0;
+cfg.run.MT    = 0;
+cfg.run.MC    = 0;
+cfg.run.CB    = 1;
 cfg.run.Rubin = 1;
 cfg.run.MCB   = 0;
 cfg.run.MN    = 0;
@@ -70,8 +70,22 @@ cfg.run.MN    = 0;
 % the same code path as the reduced ones. Keep it in the sweep as the control
 % point that separates the effect of the truncation from that of the change of
 % contact evaluation path (direct -> projected).
-cfg.interface_reduction.enabled = 0;
-cfg.interface_reduction.mode    = 'per_interface';
+% basis = where the CC modes are computed from:
+%   'guyan' static condensation of the structure onto the contact DOFs. The
+%           basis is then a property of the INTERFACE, not of the reduction
+%           method. Identical to 'self' for CB, and the only usable choice for
+%           Rubin (see below).
+%   'self'  boundary partition of the ROM being reduced (Kuether et al. 2017
+%           verbatim). For Rubin this is DEGENERATE: its interface block is
+%           spanned by residual attachment modes, which carry no low-frequency
+%           content, so the retained subspace is nearly orthogonal to the
+%           interface motion the dynamics produces and the contact response
+%           collapses to zero (measured: 94% of the FOM interface motion
+%           unrepresentable at n_cc = 6, GRE = 100%). Kept because reproducing
+%           that failure is itself a result worth reporting.
+cfg.interface_reduction.enabled = 1;
+cfg.interface_reduction.mode    = 'global';
+cfg.interface_reduction.basis   = 'guyan';
 cfg.array_ccModes               = [6, 14, 26];
 
 % --- Parameter sweeps ---
@@ -196,8 +210,20 @@ if cfg.interface_reduction.enabled
             ['cfg.array_ccModes contains values out of range: %s. ' ...
              'They must lie between 1 and n_bnd = %d.'], mat2str(bad), n_bnd_total);
     end
-    fprintf('Interface reduction: %s | CC modes %s (n_bnd = %d)\n', ...
-        cfg.interface_reduction.mode, mat2str(cfg.array_ccModes), n_bnd_total);
+    fprintf('Interface reduction: %s / %s basis | CC modes %s (n_bnd = %d)\n', ...
+        cfg.interface_reduction.mode, cfg.interface_reduction.basis, ...
+        mat2str(cfg.array_ccModes), n_bnd_total);
+end
+
+% Guyan condensation onto the contact DOFs. Depends only on the structure and
+% on which DOFs are in contact, not on the ROM or on how many modes it keeps,
+% so it is computed once and reused across the whole sweep.
+Kbb_guyan = []; Mbb_guyan = [];
+if cfg.interface_reduction.enabled && strcmpi(cfg.interface_reduction.basis, 'guyan')
+    fprintf('Computing the Guyan interface pencil (%d constraint modes)...\n', n_bnd_total);
+    tic_g = tic;
+    [Kbb_guyan, Mbb_guyan] = guyan_interface_pencil(Struct, contact_dofs);
+    fprintf('  done in %.1f s\n', toc(tic_g));
 end
 
 %% --- 5. FORCING AND INITIAL CONDITIONS --------------------------------
@@ -392,9 +418,26 @@ for Q = cfg.array_QFactor
                         F_r_spatial = F_r_spatial_full;
                     else
                         tic_ir = tic;
+
+                        % Guyan basis: the pencil is known in PHYSICAL interface
+                        % coordinates, while interface_reduction works in the
+                        % ROM's own interface coordinates. With u_phys = A*u_rom
+                        % (A = the contact rows of the boundary block of Pc, the
+                        % identity for CB and the scaling for Rubin), the
+                        % congruence A'*(.)*A moves the pencil across and leaves
+                        % the eigenvalues unchanged, so Phi_CC comes back
+                        % directly in ROM coordinates.
+                        if strcmpi(cfg.interface_reduction.basis, 'guyan')
+                            A = Pc(contact_dofs, 1:rom.n_bnd);
+                            pencil = struct('K', A' * Kbb_guyan * A, ...
+                                            'M', A' * Mbb_guyan * A);
+                        else
+                            pencil = [];
+                        end
+
                         [Mr_v, Kr_v, Cr_v, Phi_CC, ir_info] = interface_reduction( ...
                             Mr, Kr, Cr, rom.n_bnd, n_cc, ...
-                            cfg.interface_reduction.mode, iface_blocks);
+                            cfg.interface_reduction.mode, iface_blocks, pencil);
                         ir_mode = ir_info.mode;
                         switch ir_mode
                             case 'global',        model_tag = [model 'IRG'];
