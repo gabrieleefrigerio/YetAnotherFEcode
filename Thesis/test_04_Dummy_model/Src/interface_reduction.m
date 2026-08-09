@@ -36,14 +36,17 @@ function [Mr2, Kr2, Cr2, Phi_CC, info] = interface_reduction(Mr, Kr, Cr, n_bnd, 
 %
 %                  The CC modes are only a Ritz basis for the interface
 %                  displacement, so any full-rank choice is admissible and the
-%                  choice affects accuracy alone. Taking them from a Guyan
-%                  condensation of the structure (see guyan_interface_pencil)
-%                  rather than from the ROM's own boundary block makes the basis
-%                  a property of the interface instead of the reduction method.
-%                  That matters for Rubin, whose interface block is spanned by
-%                  residual attachment modes and therefore has no low-frequency
-%                  content: truncating it produces a subspace nearly orthogonal
-%                  to the interface motion the dynamics actually produces.
+%                  choice affects accuracy alone. Supplying the Guyan pencil of
+%                  the structure (see guyan_interface_pencil) instead of using
+%                  the ROM's own boundary block reproduces Tran, Comput. Struct.
+%                  79 (2001), Sec. 3.3: same Ritz subspace as his Eq. (19)-(20),
+%                  up to a change of generalized coordinates. Without it, Rubin
+%                  is degenerate - its interface block is spanned by residual
+%                  attachment modes and carries no low-frequency content, so the
+%                  truncated subspace is nearly orthogonal to the interface
+%                  motion the dynamics produces and the response collapses.
+%                  See guyan_interface_pencil for the derivation, the numbers
+%                  and the validity condition.
 %
 %   Outputs
 %     Mr2, Kr2, Cr2  interface-reduced matrices, size (n_cc + m)

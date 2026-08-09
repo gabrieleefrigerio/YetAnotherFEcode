@@ -70,19 +70,23 @@ cfg.run.MN    = 0;
 % the same code path as the reduced ones. Keep it in the sweep as the control
 % point that separates the effect of the truncation from that of the change of
 % contact evaluation path (direct -> projected).
-% basis = where the CC modes are computed from:
-%   'guyan' static condensation of the structure onto the contact DOFs. The
-%           basis is then a property of the INTERFACE, not of the reduction
-%           method. Identical to 'self' for CB, and the only usable choice for
-%           Rubin (see below).
-%   'self'  boundary partition of the ROM being reduced (Kuether et al. 2017
-%           verbatim). For Rubin this is DEGENERATE: its interface block is
-%           spanned by residual attachment modes, which carry no low-frequency
-%           content, so the retained subspace is nearly orthogonal to the
-%           interface motion the dynamics produces and the contact response
-%           collapses to zero (measured: 94% of the FOM interface motion
-%           unrepresentable at n_cc = 6, GRE = 100%). Kept because reproducing
-%           that failure is itself a result worth reporting.
+% basis = where the CC modes are computed from. Both values are methods from the
+% literature, so this selects between two published approaches:
+%   'guyan' static condensation of the structure onto the contact DOFs, i.e. the
+%           interface modes of Bourquin (1991, 1992). Reproduces Tran, Comput.
+%           Struct. 79 (2001), Sec. 3.3 for the free-interface methods: the Ritz
+%           subspace is the same as his Eq. (19)-(20) up to a change of
+%           generalized coordinates. Identical to 'self' for CB, and the only
+%           usable choice for Rubin.
+%   'self'  boundary partition of the ROM being reduced, i.e. Kuether et al.
+%           2017 verbatim. Correct for CB, which is what that paper reduces.
+%           DEGENERATE for Rubin: its interface block is spanned by residual
+%           attachment modes, which carry no low-frequency content, so the
+%           retained subspace is nearly orthogonal to the interface motion the
+%           dynamics produces and the contact response collapses to zero
+%           (measured: 94% of the FOM interface motion unrepresentable at
+%           n_cc = 6, GRE = 100%). Kept because reproducing that failure is
+%           itself a result worth reporting.
 cfg.interface_reduction.enabled = 1;
 cfg.interface_reduction.mode    = 'global';
 cfg.interface_reduction.basis   = 'guyan';
