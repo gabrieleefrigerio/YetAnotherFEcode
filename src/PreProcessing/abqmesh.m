@@ -71,7 +71,13 @@ meshinfo.elem = elem;
 meshinfo.eltype = eltype;
 
 % GET NODE SETS
+% NOTE: this pattern only matches assembly-level sets, which carry the
+% 'instance=' attribute. Sets defined on the PART export without it and are not
+% captured here. Initialising nset keeps the function from erroring out on such
+% files (the variable was previously left undefined when nothing matched);
+% callers that need part-level sets have to parse them themselves.
 b = regexp(a,'\<Nset, nset=.*?, instance=.*?\s\s(.*?)\s\s\*','tokens');
+nset = {};
 
 % parse node sets
 for ii = 1 : length(b)
