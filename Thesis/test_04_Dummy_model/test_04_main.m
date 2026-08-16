@@ -29,7 +29,7 @@ clear; close all; clc;
 %% --- 1. CONFIGURATION -------------------------------------------------
 
 % --- Model ---
-cfg.mesh_file    = 'DummyStructureAbaqus_V4.inp';
+cfg.mesh_file    = 'DummyStructureAbaqus_V5.inp';
 cfg.element_type = 'TRI3';
 
 % --- Contact interfaces ---
@@ -47,9 +47,9 @@ cfg.interfaces = { ...
     'R', 1,  1.5e-6 };      % wall on the positive X side
 
 % --- Methods to run ---
-cfg.run.FOM   = 0;
-cfg.run.MT    = 0;
-cfg.run.MC    = 0;
+cfg.run.FOM   = 1;
+cfg.run.MT    = 1;
+cfg.run.MC    = 1;
 cfg.run.CB    = 1;
 cfg.run.Rubin = 1;
 cfg.run.MCB   = 0;
@@ -88,19 +88,19 @@ cfg.run.MN    = 0;
 %           n_cc = 6, GRE = 100%). Kept because reproducing that failure is
 %           itself a result worth reporting.
 cfg.interface_reduction.enabled = 1;
-cfg.interface_reduction.mode    = 'global';
+cfg.interface_reduction.mode    = 'per_interface';
 cfg.interface_reduction.basis   = 'guyan';
-cfg.array_ccModes               = [6, 14, 26];
+cfg.array_ccModes               = [8, 16, 32, 64, 106, 212];
 
 % --- Parameter sweeps ---
-cfg.array_linModes = [50, 150, 200];
+cfg.array_linModes = [100, 200, 300];
 cfg.array_QFactor  = [1000];
 cfg.array_k_mult   = [10];        % contact stiffness multiplier
                                   % (ignored by the massless models MCB/MN)
 
 % --- Impulsive forcing ---
 cfg.impulse_g         = 1e5;      % amplitude [g]
-cfg.impulse_angle_deg = 0;        % direction in the XY plane [deg]
+cfg.impulse_angle_deg = 45;        % direction in the XY plane [deg]
 cfg.impulse_sign      = 1;        % orientation (+1 / -1)
 cfg.t_shock           = 10e-7;    % half-sine duration [s]
 
