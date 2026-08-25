@@ -18,9 +18,14 @@ classdef TransientSolverMassless < handle
     %   eta_dd + D_ee eta_d + K_ee eta + K_eb q_b = f_e(t)  (dynamic, interior)
     %   g = g0 + W' q_b ,   0 <= g  _|_  lambda >= 0
     %
-    % Gap convention: for a wall on the right, with q_b positive towards it,
-    %   W = -I ,  g0 = gap_wall   =>   g = gap_wall - q_b
-    % With signed gaps s the caller passes W = -diag(sign(s)) and g0 = |s|.
+    % Gap convention: the contact operator N of contact_operator measures the
+    % penetration as p = N*q - g, so the gap of this formulation is g = -p and
+    % the caller passes
+    %   W = -N_b' ,  g0 = g
+    % with N_b the boundary columns of the operator, i.e. N*Pc(:, 1:n_bnd).
+    % The remaining columns must vanish: this scheme requires the contact to
+    % act on the static boundary partition alone. For a wall along the positive
+    % direction of a boundary DOF this gives back W = -I and g0 = gap.
     %
     % The integrator advances on a FIXED step dt and returns its own uniform
     % time grid; it has no equivalent of the 'OutputTimes' option of ode15s.

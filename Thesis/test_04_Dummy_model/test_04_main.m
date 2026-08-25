@@ -26,6 +26,15 @@
 % =====================================================================
 clear; close all; clc;
 
+%% --- 0. PATHS ---------------------------------------------------------
+% Resolved from the location of this file, so the run does not depend on the
+% current directory: Src is the library shared with the other test cases and
+% mesh/ holds the .inp files. results/ is created next to this main.
+test_root = fileparts(mfilename('fullpath'));
+addpath(fullfile(test_root, '..', 'Src'));
+addpath(fullfile(test_root, 'mesh'));
+cd(test_root);
+
 %% --- 1. CONFIGURATION -------------------------------------------------
 
 % --- Model ---
@@ -40,6 +49,19 @@ cfg.element_type = 'TRI3';
 % The labels must exist in the .inp as *Nset, nset=ContactInterface_<label>.
 % For a single-interface model (*Nset, nset=ContactInterface) the label is
 % 'C' and the table collapses to a single row.
+%
+% contact_operator() reads this table and turns each row into a wall normal
+% (the axis, with the sign of the gap) plus a positive distance. It also
+% accepts a richer struct form, needed for a wall that is not normal to an
+% axis or not parallel to the contacting surface:
+%
+%   cfg.interfaces(1).set    = 'R';
+%   cfg.interfaces(1).normal = [cosd(5) sind(5)];   % towards the wall
+%   cfg.interfaces(1).plane  = struct('point', p0); % a point of the wall
+%   cfg.interfaces(1).dofs   = 'all';               % oblique: keep every DOF
+%
+% With 'plane' the gap is computed node by node, so it varies along the
+% surface exactly as the two planes diverge. See contact_operator.m.
 cfg.interfaces = { ...
     'T', 2,  5.0e-6 ; ...   % wall on the positive Y side
     'B', 2, -1.5e-6 ; ...   % wall on the negative Y side
@@ -124,11 +146,11 @@ fprintf('Results directory: %s\n\n', save_dir);
 
 %% --- 3. MODEL ---------------------------------------------------------
 fprintf('Building the model...\n');
-Struct = AbaqusStructure();
-Struct.filename    = cfg.mesh_file;
-Struct.elementType = cfg.element_type;
+Struct = FeStructure();
+Struct.mesh_file    = cfg.mesh_file;
+Struct.element_type = cfg.element_type;
 Struct.build();
-Struct.describe_interfaces();
+Struct.describe_node_sets();
 
 max_phi = max(cfg.array_linModes);
 fprintf('Extracting %d modes...\n', max_phi);
@@ -140,60 +162,57 @@ n_dofs_fom = size(Mc, 1);
 k_base     = max(diag(Kc));
 
 %% --- 4. CONTACT INTERFACES --------------------------------------------
-% From cfg.interfaces we derive, in one pass:
-%   contact_dofs  constrained contact DOFs, concatenated
-%   gaps_array    signed gap for each of those DOFs
+% contact_operator turns cfg.interfaces into the objects the rest of the run
+% needs:
+%   N_fom         contact operator, one row per contact node, on the
+%                 constrained DOFs. The penetration is N_fom*u - gaps_array,
+%                 with the direction of each wall carried by its row, so the
+%                 gaps are plain positive distances.
+%   contact_dofs  the interface partition, concatenated face by face
+%   iface_blocks  index ranges of each face within 1:n_bnd. Being contiguous
+%                 by construction, they are what interface_reduction() needs
+%                 to build a per-face CC basis.
 %   Interfaces    metadata for the post-processing (nodes, global DOFs, coords)
-%   iface_blocks  index ranges of each face within 1:n_bnd. Since contact_dofs
-%                 is concatenated interface by interface these ranges are
-%                 contiguous, and they are what interface_reduction() needs to
-%                 build a per-face CC basis.
 labels     = cfg.interfaces(:, 1)';
 dirs       = cell2mat(cfg.interfaces(:, 2))';
 gaps_iface = cell2mat(cfg.interfaces(:, 3))';
 
 % Every declared label must exist in the .inp file
-missing = setdiff(labels, Struct.contact_labels);
+missing = setdiff(labels, Struct.set_labels);
 if ~isempty(missing)
     error('MAIN:MissingInterface', ...
         ['Interfaces {%s} do not exist in %s.\n' ...
          'Interfaces available in the file: {%s}'], ...
-        strjoin(missing, ', '), cfg.mesh_file, strjoin(Struct.contact_labels, ', '));
+        strjoin(missing, ', '), cfg.mesh_file, strjoin(Struct.set_labels, ', '));
 end
-unused = setdiff(Struct.contact_labels, labels);
+unused = setdiff(Struct.set_labels, labels);
 if ~isempty(unused)
     fprintf('[note] Interfaces present in the .inp but not used: %s\n', strjoin(unused, ', '));
 end
 
-contact_dofs = [];
-gaps_array   = [];
-iface_blocks = {};
+[N_fom, gaps_array, cinfo] = contact_operator(Struct, cfg.interfaces);
+contact_dofs = cinfo.bnd_dofs;
+
+iface_blocks = cell(1, numel(cinfo.blocks));
 Interfaces   = struct();
 nDOFPerNode  = Struct.MeshObj.nDOFPerNode;
 offset       = 0;
 
-for i = 1:numel(labels)
-    lbl = labels{i};
-    d   = Struct.get_contact_dofs(lbl, dirs(i));
-    if isempty(d)
-        warning('MAIN:EmptyInterface', ...
-            'Interface %s: no free DOF (all its nodes are constrained). Skipped.', lbl);
-        continue;
-    end
+for i = 1:numel(cinfo.labels)
+    lbl   = cinfo.labels{i};
+    block = offset + (1:cinfo.blocks(i));
+    iface_blocks{i} = block;
+    offset = offset + cinfo.blocks(i);
 
-    contact_dofs = [contact_dofs; d];                               %#ok<AGROW>
-    gaps_array   = [gaps_array;   gaps_iface(i)*ones(numel(d), 1)]; %#ok<AGROW>
-
-    % Position of this face inside the concatenated interface vector
-    block = offset + (1:numel(d));
-    iface_blocks{end+1} = block;                                    %#ok<SAGROW>
-    offset = offset + numel(d);
-
-    n = Struct.get_contact_nodes(lbl);
+    n = cinfo.nodes{i};
     Interfaces.(lbl).rom_idx  = block;
     Interfaces.(lbl).nodes    = n;
     Interfaces.(lbl).dir      = dirs(i);
-    Interfaces.(lbl).gap      = gaps_iface(i);
+    Interfaces.(lbl).gap      = gaps_iface(i);   % signed, as the plots expect
+    Interfaces.(lbl).normal   = cinfo.spec(i).normal;
+    % Per-node gaps, positive: they differ from one another as soon as the
+    % wall is not parallel to the surface, and contact_activity reads them.
+    Interfaces.(lbl).gap_nodes = gaps_array(block);
     Interfaces.(lbl).global_X = (n - 1) * nDOFPerNode + 1;
     Interfaces.(lbl).global_Y = (n - 1) * nDOFPerNode + 2;
     Interfaces.(lbl).coord_X  = Struct.nodes(n, 1);
@@ -268,7 +287,8 @@ fprintf('Eref = %.4e J   (v_max = %.4f m/s)\n', Eref, v_max);
 % Configuration saved once: this is the contract with the post-processing
 save(fullfile(save_dir, 'run_config.mat'), ...
     'cfg', 'Interfaces', 'active_labels', 'contact_dofs', 'gaps_array', ...
-    'iface_blocks', 'Eref', 't_common', 'n_dofs_fom', 'k_base');
+    'iface_blocks', 'Eref', 't_common', 'n_dofs_fom', 'k_base', ...
+    'N_fom', 'cinfo');
 
 %% --- 6. FOM -----------------------------------------------------------
 if cfg.run.FOM
@@ -286,10 +306,10 @@ if cfg.run.FOM
             tic;
             solver = TransientSolverOde(Mc, Kc, Cc);
             [t, q] = solver.solve(cfg.tmax, cfg.dt, q0, qd0, F_fom_handle, ...
-                'ContactTargetDOF', contact_dofs, ...
+                'ContactOperator',  N_fom, ...
                 'ContactGap',       gaps_array, ...
                 'ContactPenalty',   k_contact, ...
-                'ModelType',        'FOM', ...
+                'Label',            'FOM', ...
                 'Eref',             Eref, ...
                 'RelTol',           cfg.RelTolFOM, ...
                 'OutputTimes',      t_common);
@@ -478,16 +498,30 @@ for Q = cfg.array_QFactor
                     tic;
                     if is_massless
                         % Exact set-valued contact (Monjaraz-Tec et al. 2022).
-                        % Solver convention: g = g0 + W'*q_b, contact when g <= 0.
-                        % With a signed gap s:  W = -diag(sign(s)),  g0 = |s|.
+                        % Solver convention: g = g0 + W'*q_b, contact when
+                        % g <= 0. The penetration of the operator is the
+                        % opposite of that gap, so W = -N_b' and g0 = gaps.
                         n_bnd = rom.n_bnd;
                         if n_bnd ~= numel(gaps_array)
                             error('MAIN:BndMismatch', ...
                                 '%s: n_bnd = %d but there are %d contact DOFs.', ...
                                 model, n_bnd, numel(gaps_array));
                         end
-                        W  = -diag(sign(gaps_array));
-                        g0 = abs(gaps_array);
+
+                        % This scheme solves the contact on the static boundary
+                        % partition alone, so the operator must not reach the
+                        % modal coordinates.
+                        N_rom = N_fom * Pc;
+                        modal_reach = norm(N_rom(:, n_bnd+1:end), 'fro');
+                        if modal_reach > 1e-8 * norm(N_rom(:, 1:n_bnd), 'fro')
+                            error('MAIN:ContactOnModal', ...
+                                ['%s: the contact operator reaches the modal block ' ...
+                                 '(||.|| = %.3e). The massless formulation requires ' ...
+                                 'the contact to act on the boundary partition only.'], ...
+                                model, modal_reach);
+                        end
+                        W  = -N_rom(:, 1:n_bnd)';
+                        g0 = gaps_array;
 
                         solver = TransientSolverMassless(Mr_v, Kr_v, Cr_v, n_bnd, W, g0);
                         [t, q_rom, lambda, info] = solver.solve( ...
@@ -509,64 +543,35 @@ for Q = cfg.array_QFactor
                                 model, numel(t), numel(t_common));
                         end
                     else
-                        % Penalty contact with ode15s.
-                        gaps_run = gaps_array;
-                        k_run    = k_contact;
-
+                        % Penalty contact with ode15s. Whatever the model, the
+                        % operator in the solved coordinates is N times the map
+                        % from those coordinates to the physical DOFs: Pc for a
+                        % plain ROM, Pc*T_CC once the interface is reduced. This
+                        % single expression replaces the three special cases the
+                        % run used to need (projected for MT and MC, direct
+                        % indices for the CMS ROMs, and a third form after
+                        % interface reduction).
+                        %
+                        % Gaps and penalty stay physical, so Rubin needs no
+                        % rescaling of its own: the scaling of its basis is
+                        % already inside Pc and the operator picks it up.
+                        N_run = N_fom * Pc;
                         if n_cc > 0
-                            % Interface reduced: the interface is now modal, so the
-                            % contact must be evaluated in physical space through a
-                            % projection. That projection is just Phi_CC: for CB and
-                            % Rubin the contact rows of Pc are [D^-1, 0], so
-                            %   Pc(contact,:) * T_CC = [D^-1 * Phi_CC, 0]
-                            % and nothing of full size needs to be formed.
-                            Pc_bnd = Pc(contact_dofs, 1:rom.n_bnd);
-                            coupling = norm(Pc(contact_dofs, rom.n_bnd+1:end), 'fro');
-                            % Rubin leaves round-off here (~1e-11 relative) from
-                            % inverting T1_bb, so the threshold is loose enough to
-                            % ignore that while still catching a genuinely coupled
-                            % modal block, which would be O(1) relative.
-                            if coupling > 1e-8 * max(norm(Pc_bnd, 'fro'), eps)
-                                error('MAIN:InterfaceNotAtHead', ...
-                                    ['%s: the modal block of Pc is not zero at the contact rows ' ...
-                                     '(||.|| = %.3e). This ROM does not keep the interface as ' ...
-                                     'physical coordinates at the head of the basis, so the ' ...
-                                     'interface reduction cannot be applied in this form.'], ...
-                                    model, coupling);
-                            end
-                            Pc_contact_ir = [Pc_bnd * Phi_CC, zeros(numel(contact_dofs), r_v - n_cc)];
-
-                            solver_args = {'ContactTargetDOF', 1:numel(contact_dofs), ...
-                                           'ModelType', 'MC', 'ProjectionMatrix', Pc_contact_ir};
-                            % Gaps and penalty stay physical: the projected path
-                            % works in physical coordinates, so Rubin's scaling must
-                            % NOT be applied on top (it is already inside Pc).
-
-                        elseif any(strcmp(model, {'MT', 'MC'}))
-                            % Projected penalty: the contact DOFs stay physical and
-                            % the solver reaches them through Pc.
-                            solver_args = {'ContactTargetDOF', contact_dofs, ...
-                                           'ModelType', 'MC', 'ProjectionMatrix', Pc};
-                        else
-                            % CMS ROM: the interface sits at the head of the
-                            % reduced vector, so the contact DOFs are direct indices.
-                            if strcmp(model, 'Rubin')
-                                % Rubin scales the basis: gap and penalty must be
-                                % expressed in the scaled coordinates.
-                                [gaps_run, k_run] = rom.contact_params(gaps_array, k_contact);
-                            end
-                            solver_args = {'ContactTargetDOF', 1:numel(contact_dofs), ...
-                                           'ModelType', model};
+                            % T_CC = blkdiag(Phi_CC, I), applied on the right
+                            % without ever forming it.
+                            N_run = [N_run(:, 1:rom.n_bnd) * Phi_CC, ...
+                                     N_run(:, rom.n_bnd+1:end)];
                         end
 
                         solver = TransientSolverOde(Mr_v, Kr_v, Cr_v);
                         [t, q_rom] = solver.solve(cfg.tmax, cfg.dt, q0_r, qd0_r, F_handle, ...
-                            solver_args{:}, ...
-                            'ContactGap',     gaps_run, ...
-                            'ContactPenalty', k_run, ...
-                            'Eref',           Eref, ...
-                            'RelTol',         cfg.RelTol, ...
-                            'OutputTimes',    t_common);
+                            'ContactOperator', N_run, ...
+                            'ContactGap',      gaps_array, ...
+                            'ContactPenalty',  k_contact, ...
+                            'Label',           model_tag, ...
+                            'Eref',            Eref, ...
+                            'RelTol',          cfg.RelTol, ...
+                            'OutputTimes',     t_common);
                     end
                     cpu_time = toc;
 
