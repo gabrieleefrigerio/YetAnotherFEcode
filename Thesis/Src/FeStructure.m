@@ -523,7 +523,14 @@ classdef FeStructure < handle
             if isempty(obj.mode_shapes)
                 error('FeStructure:NoModes', 'Run compute_eigenmodes() first.');
             end
-            if nargin < 3 || isempty(scale_factor), scale_factor = 1; end
+            % compute_eigenmodes normalizes each mode to unit largest NODAL
+            % displacement, so the shape carries no length scale: a factor of 1
+            % would draw a one-metre deformation on a micrometre-sized model.
+            % Default to a fraction of the model size, which is independent of
+            % the units and works in 2D and 3D alike.
+            if nargin < 3 || isempty(scale_factor)
+                scale_factor = 0.2 * max(max(obj.nodes, [], 1) - min(obj.nodes, [], 1));
+            end
             v = reshape(obj.mode_shapes(:, mode_idx), obj.MeshObj.nDOFPerNode, []).';
             figure('Name', sprintf('Mode %d', mode_idx), 'Color', 'w');
             PlotMesh(obj.nodes, obj.plot_connectivity(), 0); hold on;
