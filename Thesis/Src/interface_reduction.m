@@ -1,7 +1,7 @@
-function [Mr2, Kr2, Cr2, Phi_CC, info] = interface_reduction(Mr, Kr, Cr, n_bnd, n_cc, mode, iface_blocks, pencil)
+function [Mr2, Kr2, Cr2, Phi_CC, info] = interface_reduction(Mr, Kr, Cr, n_bnd, n_cc, mode, iface_blocks, pencil, static_correction, cc_alloc)
 %INTERFACE_REDUCTION Secondary modal reduction of the interface partition of a CMS ROM.
 %
-%   [Mr2, Kr2, Cr2, Phi_CC, info] = INTERFACE_REDUCTION(Mr, Kr, Cr, n_bnd, n_cc, mode, iface_blocks, pencil)
+%   [Mr2, Kr2, Cr2, Phi_CC, info] = INTERFACE_REDUCTION(Mr, Kr, Cr, n_bnd, n_cc, mode, iface_blocks, pencil, static_correction)
 %
 %   Applies to ROMs whose reduced basis keeps the interface as physical
 %   coordinates at the HEAD of the vector, i.e. q = [x_b ; q_modal] with
@@ -47,6 +47,12 @@ function [Mr2, Kr2, Cr2, Phi_CC, info] = interface_reduction(Mr, Kr, Cr, n_bnd, 
 %                  motion the dynamics produces and the response collapses.
 %                  See guyan_interface_pencil for the derivation, the numbers
 %                  and the validity condition.
+%     static_correction  logical (optional). Adds back the quasi-static
+%                  flexibility of the truncated CC modes as info.R_res, a local
+%                  contact compliance. Defined for the 'global' basis ONLY; for
+%                  'per_interface' it is skipped and info.R_res stays empty.
+%     cc_alloc     optional per-face mode allocation, passed to cc_modes;
+%                  'per_interface' only. Empty pools the modes by frequency.
 %
 %   Outputs
 %     Mr2, Kr2, Cr2  interface-reduced matrices, size (n_cc + m)
@@ -117,23 +123,15 @@ if not_spd > 0
 end
 
 % ---------- CC modes ----------
-switch lower(mode)
-    case 'global'
-        [Phi_CC, w2] = solve_cc(K_bb, M_bb, n_cc, DENSE_LIMIT);
-        modes_per_face = [];
-
-    case 'per_interface'
-        if nargin < 7 || isempty(iface_blocks)
-            error('IR:NoBlocks', ...
-                'mode ''per_interface'' requires iface_blocks, one index vector per contact face.');
-        end
-        [Phi_CC, w2, modes_per_face] = solve_cc_per_face(K_bb, M_bb, n_cc, iface_blocks, ...
-                                                         n_bnd, DENSE_LIMIT);
-
-    otherwise
-        error('IR:BadMode', 'Unknown mode ''%s'': use ''global'' or ''per_interface''.', mode);
-end
-
+% Delegated to cc_modes so the reduction and the plotting scripts share one
+% implementation and cannot drift apart. cc_alloc (optional) fixes how many CC
+% modes each contact face contributes; empty leaves cc_modes to pool by
+% frequency. n_cc is re-read from the result so everything downstream - the
+% size of T_CC, the file name, the R_res guard - uses the count that was
+% actually produced.
+if nargin < 10, cc_alloc = []; end
+[Phi_CC, w2, modes_per_face] = cc_modes(K_bb, M_bb, n_cc, mode, iface_blocks, DENSE_LIMIT, cc_alloc);
+n_cc = size(Phi_CC, 2);
 % ---------- secondary transformation ----------
 T_CC = blkdiag(Phi_CC, eye(m));
 
@@ -146,91 +144,41 @@ f_cc = sqrt(max(w2, 0)) / (2*pi);
 info = struct('mode', lower(mode), 'basis', basis_src, 'n_cc', n_cc, 'n_bnd', n_bnd, ...
               'f_cc', f_cc, 'modes_per_face', modes_per_face);
 
+% ---------- residual flexibility of the truncated CC modes (GLOBAL only) ----------
+% Truncation drops the CC modes above n_cc as if they did not exist. They do
+% exist, but at 1e8-1e9 Hz against an excitation of about 1 MHz, so they carry
+% no dynamics: they deflect quasi-statically under the contact load. Adding
+% their static contribution back as a local compliance keeps the contact from
+% being artificially STIFF.
+%
+% This correction is defined for the 'global' basis only. There Phi is the
+% M_bb-orthonormal set of eigenvectors of the whole boundary pencil, so
+%
+%       R_res = K_bb^-1 - Phi * (Phi' K_bb Phi)^-1 * Phi'
+%              = sum_{i>n_cc} phi_i phi_i' / w_i^2
+%
+% is the residual MODAL flexibility of the modes above n_cc. The
+% 'per_interface' variant is NOT M_bb-orthonormal (each face's modes are
+% orthonormal only within their own block, while M_bb couples the faces), so
+% this static correction is not defined for it and is skipped: those runs use
+% the plain penalty law, exactly as an uncorrected interface reduction.
+info.R_res = [];
+want_static = nargin >= 9 && ~isempty(static_correction) && static_correction && n_cc < n_bnd;
+if want_static && strcmpi(mode, 'global')
+    Kinv = K_bb \ eye(n_bnd);
+    info.R_res = Kinv - Phi_CC * ((Phi_CC' * K_bb * Phi_CC) \ Phi_CC');
+    info.R_res = (info.R_res + info.R_res') / 2;
+    fprintf('  [IR] residual flexibility of the %d truncated modes retained\n', ...
+        n_bnd - n_cc);
+elseif want_static
+    fprintf('  [IR] static correction is only available for the global CC basis; skipped for ''%s''\n', ...
+        lower(mode));
+end
+
 fprintf('  [IR] %s / %s basis | %d/%d interface DOFs retained | CC freq %.3e - %.3e Hz\n', ...
     lower(mode), basis_src, n_cc, n_bnd, f_cc(1), f_cc(end));
 if ~isempty(modes_per_face)
     fprintf('  [IR] modes per face: %s\n', mat2str(modes_per_face));
 end
 
-end
-
-% =====================================================================
-function [Phi, w2] = solve_cc(K, M, n_keep, dense_limit)
-% Lowest n_keep modes of (K - w^2 M) phi = 0, mass normalized.
-n = size(K, 1);
-
-if n <= dense_limit || n_keep >= n
-    [V, D] = eig(K, M, 'chol');
-    [w2_all, idx] = sort(real(diag(D)), 'ascend');
-    V = real(V(:, idx));
-    Phi = V(:, 1:n_keep);
-    w2  = w2_all(1:n_keep);
-else
-    [V, D] = eigs(sparse(K), sparse(M), n_keep, 'smallestabs');
-    [w2, idx] = sort(real(diag(D)), 'ascend');
-    Phi = real(V(:, idx));
-end
-
-% Mass normalization with respect to the M actually used in the eigenproblem
-for i = 1:size(Phi, 2)
-    nrm = sqrt(Phi(:,i)' * M * Phi(:,i));
-    if nrm > 0
-        Phi(:,i) = Phi(:,i) / nrm;
-    end
-end
-end
-
-% =====================================================================
-function [Phi, w2, modes_per_face] = solve_cc_per_face(K_bb, M_bb, n_cc, iface_blocks, n_bnd, dense_limit)
-% One eigenproblem per contact face, then pool the modes across faces, sort by
-% frequency and keep the n_cc lowest. Each resulting mode is supported on a
-% single face, so Phi has block structure: a deformation localized on one face
-% lives in that face's subspace instead of having to be synthesized by
-% cancellation between modes spread over all the faces.
-
-n_faces = numel(iface_blocks);
-
-% The blocks must partition 1:n_bnd exactly, otherwise the pooled basis would
-% either miss interface DOFs or count some twice.
-all_idx = sort([iface_blocks{:}]);
-if ~isequal(all_idx(:)', 1:n_bnd)
-    error('IR:BadBlocks', ...
-        ['iface_blocks must be a partition of 1:%d (found %d indices, %d unique). ' ...
-         'Check how the interface blocks were recorded in the main.'], ...
-        n_bnd, numel(all_idx), numel(unique(all_idx)));
-end
-
-% --- solve each face separately ---
-Phi_pool  = zeros(n_bnd, n_bnd);   % at most n_bnd modes in total
-w2_pool   = zeros(n_bnd, 1);
-face_pool = zeros(n_bnd, 1);
-filled    = 0;
-
-for f = 1:n_faces
-    idx = iface_blocks{f}(:)';
-    nf  = numel(idx);
-    if nf == 0, continue; end
-
-    Kf = K_bb(idx, idx);  Kf = (Kf + Kf') / 2;
-    Mf = M_bb(idx, idx);  Mf = (Mf + Mf') / 2;
-
-    % Keep every mode of the face here; the truncation happens after pooling,
-    % so that the frequency ordering decides the allocation between faces.
-    [Phi_f, w2_f] = solve_cc(Kf, Mf, nf, dense_limit);
-
-    rows = filled + (1:nf);
-    Phi_pool(idx, rows) = Phi_f;   % zero outside this face: block structure
-    w2_pool(rows)       = w2_f;
-    face_pool(rows)     = f;
-    filled              = filled + nf;
-end
-
-% --- pool, sort by frequency, truncate ---
-[w2_sorted, ord] = sort(w2_pool(1:filled), 'ascend');
-ord = ord(1:n_cc);
-
-Phi = Phi_pool(:, ord);
-w2  = w2_sorted(1:n_cc);
-
-modes_per_face = accumarray(face_pool(ord), 1, [n_faces, 1])';
 end

@@ -20,7 +20,18 @@
 %  file does not respect it the script stops, rather than silently comparing
 %  data that is not comparable.
 % =====================================================================
-clear; close all; clc;
+% Set pp_results_dir before calling to drive this from another script without
+% the folder dialog. It is consumed here and cleared with everything else, so
+% running the script by hand ALWAYS asks: an override that survived would
+% silently reuse the previous folder, which is worse than no override at all.
+if exist('pp_results_dir', 'var') && ~isempty(pp_results_dir)
+    pp_dir = pp_results_dir;
+else
+    pp_dir = '';
+end
+clearvars -except pp_dir; close all; clc;
+
+addpath(fullfile(fileparts(mfilename('fullpath')), '..', 'Src'));
 
 %% --- Options ----------------------------------------------------------
 
@@ -42,6 +53,17 @@ gre_floor_pct = 3.0e-7 * 100;
 % onto zero and its line is unreadable, so it is drawn only in log scale.
 gre_plot_log = false;
 
+% Tracking time: for how long does the ROM stay within a given error of the
+% FOM. On a chaotic problem this discriminates better than a windowed GRE,
+% because it does not saturate and needs no window chosen by hand. In the
+% exponential regime one decade of threshold buys ln(10)/lambda of extra
+% horizon, so the ranking is insensitive to the choice but the numbers are
+% not: keep a set, not a single value.
+%   headline = index of the threshold carried into the summary table.
+track_thresholds = [0.1 1 10];    % [%]
+track_headline   = 2;             % -> 1 %
+track_hold_frac  = 0.01;          % a crossing counts after 1% of the run above
+
 % Node of each interface to draw in the time histories.
 node_idx = 1;
 
@@ -58,9 +80,16 @@ end
 fprintf('Reference metric: %s\n', gre_tag);
 
 %% --- 1. Results folder ------------------------------------------------
-results_dir = uigetdir(pwd, 'Select the results folder');
-if results_dir == 0
-    error('PP:NoFolder', 'No folder selected.');
+if isempty(pp_dir)
+    results_dir = uigetdir(pwd, 'Select the results folder');
+    if results_dir == 0
+        error('PP:NoFolder', 'No folder selected.');
+    end
+else
+    results_dir = pp_dir;
+    if ~isfolder(results_dir)
+        error('PP:NoFolder', 'pp_results_dir does not exist: %s', results_dir);
+    end
 end
 fprintf('Folder: %s\n', results_dir);
 
@@ -118,19 +147,27 @@ fprintf(log_file, ' Eref = %.4e J\n\n', R.Eref);
 summary = struct('method', {}, 'phi', {}, 'n_cc', {}, 'ir_mode', {}, ...
                  'Q', {}, 'K', {}, ...
                  'gre_full', {}, 'gre_win', {}, 'gre_ref', {}, ...
+                 't_track_us', {}, 't_track_cens', {}, 'frac_track', {}, ...
                  'cpu', {}, 'offline', {});
+
+% Tracking time at EVERY threshold, one row per ROM, kept apart from the
+% summary table because it is a matrix: the table carries only the headline.
+TRK.T    = [];      % [n_rom x k] horizon [s]
+TRK.cens = [];      % [n_rom x k] logical, threshold never crossed
+TRK.frac = [];      % [n_rom x k] fraction of the run spent inside the band
+TRK.name = {};      % [n_rom x 1] label
 
 %% --- 4. Loop over the cases (Q, k_mult) -------------------------------
 for i_fom = 1:numel(fom_files)
-    tok = regexp(fom_files(i_fom).name, 'FOM_Q(\d+)_K([\d\.]+)\.mat', 'tokens');
+    tok = regexp(fom_files(i_fom).name, 'FOM_Q([\d\.eE+-]+)_K([\d\.eE+-]+)\.mat', 'tokens');
     if isempty(tok), continue; end
     Q_val = str2double(tok{1}{1});
     K_val = str2double(tok{1}{2});
 
     fprintf('\n======================================================\n');
-    fprintf('Case: Q = %d | k_mult = %g\n', Q_val, K_val);
+    fprintf('Case: Q = %g | k_mult = %g\n', Q_val, K_val);
     fprintf('======================================================\n');
-    fprintf(log_file, '>>> CASE: Q = %d | k_mult = %g <<<\n', Q_val, K_val);
+    fprintf(log_file, '>>> CASE: Q = %g | k_mult = %g <<<\n', Q_val, K_val);
 
     fom   = load(fullfile(results_dir, fom_files(i_fom).name));
     t_ref = fom.t(:);
@@ -145,7 +182,7 @@ for i_fom = 1:numel(fom_files)
     end
 
     % --- ROMs available for this case, grouped by method ---
-    rom_files = dir(fullfile(results_dir, sprintf('ROM_*_Q%04d_K%g.mat', Q_val, K_val)));
+    rom_files = dir(fullfile(results_dir, sprintf('ROM_*_Q%g_K%g.mat', Q_val, K_val)));
     if isempty(rom_files)
         fprintf('  No ROM for this case.\n');
         continue;
@@ -162,15 +199,21 @@ for i_fom = 1:numel(fom_files)
         method    = methods_here{im};
         sel_files = rom_files(strcmp(rom_models, method));
 
-        fig = figure('Name', sprintf('%s - Q%d - K%g', method, Q_val, K_val), ...
+        fig = figure('Name', sprintf('%s - Q%g - K%g', method, Q_val, K_val), ...
                      'NumberTitle', 'off', 'Color', 'w', ...
                      'Position', [100, 50, 1000, 250*(n_faces+1)]);
         n_sub = n_faces + 1;
         axs   = gobjects(n_sub, 1);
 
+        % tiledlayout instead of subplot: it is what lets the legend get a
+        % tile of its OWN ('north', below) rather than sitting inside an
+        % axes and covering data. TileSpacing stays 'compact' as subplot
+        % effectively was; the legend's row is added on top of that.
+        tl = tiledlayout(fig, n_sub, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+
         % --- one subplot per interface: FOM response and wall position ---
         for f = 1:n_faces
-            axs(f) = subplot(n_sub, 1, f);
+            axs(f) = nexttile(tl);
             hold(axs(f), 'on'); grid(axs(f), 'on');
 
             y_fom_face = fom.y_contact.(faces{f}).(face_dir{f})(node_idx, :);
@@ -192,9 +235,17 @@ for i_fom = 1:numel(fom_files)
         end
 
         % --- GRE(t) subplot ---
-        axs(n_sub) = subplot(n_sub, 1, n_sub);
+        axs(n_sub) = nexttile(tl);
         hold(axs(n_sub), 'on'); grid(axs(n_sub), 'on');
         title(axs(n_sub), 'Global Relative Error over time');
+        % Tracking thresholds: the horizon in the summary is the abscissa at
+        % which a curve leaves its band, so drawing the bands makes that
+        % number readable off the figure instead of taken on trust.
+        for t_thr = track_thresholds
+            yline(axs(n_sub), t_thr, ':', sprintf('%g%%', t_thr), ...
+                'Color', [0.45 0.45 0.45], 'LineWidth', 1.0, ...
+                'LabelHorizontalAlignment', 'left', 'HandleVisibility', 'off');
+        end
         xlabel(axs(n_sub), 'Time [s]');
         ylabel(axs(n_sub), 'GRE [%]');
         if gre_plot_log
@@ -261,6 +312,20 @@ for i_fom = 1:numel(fom_files)
             norm_diff_t = sqrt(sum((y_fom_cat - y_rom_cat).^2, 1));
             gre_t = norm_diff_t ./ (max(sqrt(sum(y_fom_cat.^2, 1))) + eps) * 100;
 
+            % Tracking time, fed the SAME curve that gets plotted so that the
+            % number in the table and the crossing visible in the figure can
+            % never disagree.
+            rom_label = sprintf('%s Phi%d', method, phi_val);
+            if n_cc_val > 0
+                rom_label = sprintf('%s CC%d', rom_label, n_cc_val);
+            end
+            trk = rom_tracking_time(t_ref, gre_t, track_thresholds, ...
+                'HoldFraction', track_hold_frac, 'Label', rom_label);
+            TRK.T(end+1, :)    = trk.T;
+            TRK.cens(end+1, :) = trk.censored;
+            TRK.frac(end+1, :) = trk.frac;
+            TRK.name{end+1, 1} = rom_label;
+
             % --- legend ---
             time_info = '';
             if ~isnan(rom_off), time_info = sprintf('Off: %.2fs', rom_off); end
@@ -300,7 +365,11 @@ for i_fom = 1:numel(fom_files)
             summary(end+1) = struct('method', method, 'phi', phi_val, ...
                 'n_cc', n_cc_val, 'ir_mode', ir_mode_val, ...
                 'Q', Q_val, 'K', K_val, 'gre_full', gre_full, 'gre_win', gre_win, ...
-                'gre_ref', gre_ref, 'cpu', rom_cpu, 'offline', rom_off); %#ok<SAGROW>
+                'gre_ref', gre_ref, ...
+                't_track_us', 1e6*trk.T(track_headline), ...
+                't_track_cens', trk.censored(track_headline), ...
+                'frac_track', trk.frac(track_headline), ...
+                'cpu', rom_cpu, 'offline', rom_off); %#ok<SAGROW>
 
             % --- log ---
             if isnan(rom_off), off_str = 'N/A'; else, off_str = sprintf('%6.2fs', rom_off); end
@@ -317,13 +386,29 @@ for i_fom = 1:numel(fom_files)
                 method, phi_val, cc_str, gre_full, gre_win, off_str, on_str, flag);
             fprintf(log_file, '  %-9s Phi %03d | CC %s | GRE_full %9.4f%% | GRE_win %9.4f%% | Off %s | On %s%s\n', ...
                 method, phi_val, cc_str, gre_full, gre_win, off_str, on_str, flag);
+            if trk.censored(track_headline), pre = '>'; else, pre = ' '; end
+            fprintf('                 within %g%%: %s%.3f us  (inside the band %.0f%% of the run)\n', ...
+                track_thresholds(track_headline), pre, 1e6*trk.T(track_headline), ...
+                100*trk.frac(track_headline));
+            fprintf(log_file, '                 within %g%%: %s%.3f us  (inside %.0f%%)\n', ...
+                track_thresholds(track_headline), pre, 1e6*trk.T(track_headline), ...
+                100*trk.frac(track_headline));
         end
 
-        legend(axs(1), 'Location', 'best');
-        sgtitle(fig, sprintf('%s method (Q = %d, k_{mult} = %g)', method, Q_val, K_val), ...
+        % A tile of its own ('north') rather than 'Location','best' inside
+        % axs(1): with many ROM curves 'best' has nowhere left to hide the
+        % legend without covering a trace. The north tile reserves exactly
+        % the height the legend needs and pushes every plot down by that
+        % much, so nothing is ever covered.
+        lg = legend(axs(1));
+        lg.Layout.Tile = 'north';
+        lg.Orientation = 'horizontal';
+        lg.NumColumns  = min(numel(sel_files) + 2, 4);
+
+        sgtitle(fig, sprintf('%s method (Q = %g, k_{mult} = %g)', method, Q_val, K_val), ...
             'FontSize', 16, 'FontWeight', 'bold');
 
-        base_name = fullfile(results_dir, sprintf('Compare_%s_Q%d_K%g', method, Q_val, K_val));
+        base_name = fullfile(results_dir, sprintf('Compare_%s_Q%g_K%g', method, Q_val, K_val));
         exportgraphics(fig, [base_name '.png'], 'Resolution', 300);
         savefig(fig, [base_name '.fig']);
         fprintf('  -> figure saved: %s.png\n', base_name);
@@ -340,6 +425,58 @@ end
 
 T_summary = struct2table(summary);
 writetable(T_summary, fullfile(results_dir, sprintf('summary_%s.csv', lower(gre_mode))));
+
+% --- Tracking time at every threshold ----------------------------------
+% Its own file because it is a matrix, not a column of the summary. A ">" in
+% the console means the threshold was never crossed: that row is CENSORED and
+% its number is a lower bound, so it must not be averaged in with the others
+% nor read as a horizon.
+if ~isempty(TRK.name)
+    T_track = table(TRK.name, 'VariableNames', {'rom'});
+    for i_thr = 1:numel(track_thresholds)
+        tag = strrep(strrep(sprintf('%g', track_thresholds(i_thr)), '.', 'p'), '-', 'm');
+        T_track.(sprintf('T_%s_us',   tag)) = 1e6 * TRK.T(:, i_thr);
+        T_track.(sprintf('cens_%s',   tag)) = TRK.cens(:, i_thr);
+        T_track.(sprintf('inside_%s', tag)) = TRK.frac(:, i_thr);
+    end
+    writetable(T_track, fullfile(results_dir, 'tracking_time.csv'));
+
+    fprintf('\n--- Tracking time: how long the ROM stays within a threshold ---\n');
+    fprintf(log_file, '\n--- Tracking time ---\n');
+    hdr = sprintf('%-24s', 'ROM');
+    for thr = track_thresholds
+        hdr = [hdr sprintf('%12s', sprintf('< %g%%', thr))]; %#ok<AGROW>
+    end
+    fprintf('%s\n', hdr); fprintf(log_file, '%s\n', hdr);
+    for r = 1:numel(TRK.name)
+        row = sprintf('%-24s', TRK.name{r});
+        for i_thr = 1:numel(track_thresholds)
+            if TRK.cens(r, i_thr), pre = '>'; else, pre = ' '; end
+            row = [row sprintf('%11s', sprintf('%s%.3fus', pre, 1e6*TRK.T(r, i_thr)))]; %#ok<AGROW>
+        end
+        fprintf('%s\n', row); fprintf(log_file, '%s\n', row);
+    end
+
+    figT = figure('Name','Tracking time','Color','w','Position',[100 100 1000 560]);
+    hold on; grid on; box on
+    bh = bar(1e6 * TRK.T, 'grouped');
+    for i_thr = 1:numel(track_thresholds)
+        cs = logical(TRK.cens(:, i_thr));   % assignment into [] makes it double
+        if any(cs)
+            plot(bh(i_thr).XEndPoints(cs), 1e6*TRK.T(cs, i_thr), '^k', ...
+                'MarkerFaceColor', 'w', 'MarkerSize', 7, 'HandleVisibility', 'off');
+        end
+        bh(i_thr).DisplayName = sprintf('within %g%%', track_thresholds(i_thr));
+    end
+    set(gca, 'XTick', 1:numel(TRK.name), 'XTickLabel', TRK.name, ...
+        'TickLabelInterpreter', 'none', 'XTickLabelRotation', 45);
+    ylabel('time inside the error band [\mus]');
+    title(['How long each ROM tracks the FOM    ' ...
+        '(open marker = never left the band, so the bar is a lower bound)']);
+    legend('Location', 'northeast');
+    exportgraphics(figT, fullfile(results_dir, 'Summary_TrackingTime.png'), 'Resolution', 300);
+    savefig(figT, fullfile(results_dir, 'Summary_TrackingTime.fig'));
+end
 
 uniq_methods = unique(T_summary.method, 'stable');
 mk = {'o-','s-','^-','d-','v-','>-'};
@@ -369,21 +506,7 @@ exportgraphics(figA, fullfile(results_dir, ...
 savefig(figA, fullfile(results_dir, sprintf('Summary_GRE_vs_phi_%s.fig', lower(gre_mode))));
 
 % --- Figure B: accuracy / online cost trade-off ---
-figB = figure('Name','Accuracy-cost Pareto','Color','w','Position',[100 100 800 600]);
-hold on; grid on;
-for m = 1:numel(uniq_methods)
-    sel = strcmp(T_summary.method, uniq_methods{m});
-    [cpus, iord] = sort(T_summary.cpu(sel));
-    g = T_summary.gre_ref(sel);
-    plot(cpus, g(iord), mk{min(m,numel(mk))}, 'LineWidth', 1.8, ...
-        'MarkerSize', 7, 'DisplayName', uniq_methods{m});
-end
-yline(gre_floor_pct, 'r--', 'LineWidth', 1.5, 'DisplayName', 'Integration floor');
-set(gca, 'XScale', 'log', 'YScale', 'log');
-xlabel('Online CPU time [s]');
-ylabel(gre_desc);
-title('Accuracy-cost trade-off (online)');
-legend('Location','southwest'); box on;
+figB = plot_pareto(T_summary, gre_desc, gre_floor_pct);
 exportgraphics(figB, fullfile(results_dir, ...
     sprintf('Summary_Pareto_%s.png', lower(gre_mode))), 'Resolution', 300);
 savefig(figB, fullfile(results_dir, sprintf('Summary_Pareto_%s.fig', lower(gre_mode))));

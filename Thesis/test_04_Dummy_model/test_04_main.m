@@ -68,14 +68,17 @@ cfg.interfaces = { ...
     'L', 1, -5.0e-6 ; ...   % wall on the negative X side
     'R', 1,  1.5e-6 };      % wall on the positive X side
 
+% cfg.interfaces = { ...
+%     'R', 1,  1.5e-6 };      % wall on the positive X side
+
 % --- Methods to run ---
-cfg.run.FOM   = 1;
-cfg.run.MT    = 1;
-cfg.run.MC    = 1;
-cfg.run.CB    = 1;
-cfg.run.Rubin = 1;
+cfg.run.FOM   = 0;
+cfg.run.MT    = 0;
+cfg.run.MC    = 0;
+cfg.run.CB    = 0;
+cfg.run.Rubin = 0;
 cfg.run.MCB   = 0;
-cfg.run.MN    = 0;
+cfg.run.MN    = 1;
 
 % --- Interface reduction (CB and Rubin only) ---
 % Secondary modal reduction of the interface partition: the n_bnd physical
@@ -111,24 +114,73 @@ cfg.run.MN    = 0;
 %           itself a result worth reporting.
 cfg.interface_reduction.enabled = 1;
 cfg.interface_reduction.mode    = 'per_interface';
+% equal_per_face applies only to mode 'per_interface': when true, every contact
+% face gets the SAME number of CC modes (array_ccModes distributed evenly, so
+% k modes per interface means array_ccModes = k * number_of_faces). When false,
+% the modes are pooled across faces and chosen by frequency, so a softer face
+% takes more of them. The total, hence the reduced size and the file name, is
+% array_ccModes either way, so the two are directly comparable in the plots.
+cfg.interface_reduction.equal_per_face = false;
 cfg.interface_reduction.basis   = 'guyan';
-cfg.array_ccModes               = [8, 16, 32, 64, 106, 212];
-
+% static_correction = put back what the truncation throws away, instead of
+% pretending it is not there. The CC modes above n_cc sit at 1e8-1e9 Hz against
+% an excitation of about 1 MHz, so they carry no dynamics: they only deflect,
+% quasi-statically, under the contact load. That deflection is the LOCAL
+% COMPLIANCE of the interface, and a truncated model without it is artificially
+% RIGID exactly where the contact is evaluated.
+%
+% Switching this on restores it in closed form: the contact spring is put in
+% series with that compliance. It adds NO state to the ODE - the reduced size is
+% unchanged - and only the contact force law changes. It costs 16-32% of CPU and
+% is inactive by construction when n_cc = n_bnd, where there is nothing to
+% restore.
+%
+% Measured on the 3D model, Rubin phi = 200 over 10 us (error against the FOM):
+%   n_cc =  16    11.34% -> 6.39%
+%   n_cc =  64     4.93% -> 1.03%
+%   n_cc = 128     1.05% -> 0.204%
+%
+% Applies to the penalty methods with interface reduction (CB, Rubin). The
+% massless models (MCB, MN) solve the contact by a different route and ignore it.
+cfg.interface_reduction.static_correction = false;
+% cfg.array_ccModes               = [8, 16, 32, 64, 106, 212];
+cfg.array_ccModes               = [10, 20, 40, 81];
 % --- Parameter sweeps ---
 cfg.array_linModes = [100, 200, 300];
+% --- Damping ---
+% Rayleigh, C = alpha*M + beta*K, so 1/Q(f) = alpha/(2*pi*f) + 2*pi*f*beta.
+% Two anchors fix alpha and beta and EVERYTHING ELSE IS EXTRAPOLATION, so the
+% anchor FREQUENCIES matter at least as much as the quality factors.
+%
+% cfg.Q_freq decides how array_QFactor is read, and nothing else does:
+%   Q_freq ABSENT   array_QFactor is a sweep, one Q per case, applied at both
+%                   anchors, which are the first two natural frequencies.
+%   Q_freq PRESENT  array_QFactor holds exactly two values, one per anchor.
+%                   Row or column makes no difference, and there is no sweep -
+%                   run the main twice to compare two dampings.
+%
+% Leaving Q_freq out pins both anchors within 10% of each other, so asking for
+% Q = 1000 there quietly gives Q = 15 at 1 MHz and Q = 3 at 5 MHz: 17% of
+% critical on exactly the frequencies the contact excites. The parametrisation
+% used at TDK pins them where the physics is:
+%
+%   cfg.Q_freq        = [30e3, 5e6];
+%   cfg.array_QFactor = [300, 5000];      % Q = 300 at 30 kHz, 5000 at 5 MHz
 cfg.array_QFactor  = [1000];
+% cfg.Q_freq        = [30e3, 5e6];   % <- uncomment these two for the TDK anchors
+% cfg.array_QFactor = [300, 5000];
 cfg.array_k_mult   = [10];        % contact stiffness multiplier
                                   % (ignored by the massless models MCB/MN)
 
 % --- Impulsive forcing ---
 cfg.impulse_g         = 1e5;      % amplitude [g]
-cfg.impulse_angle_deg = 45;        % direction in the XY plane [deg]
+cfg.impulse_angle_deg = 0;        % direction in the XY plane [deg]
 cfg.impulse_sign      = 1;        % orientation (+1 / -1)
 cfg.t_shock           = 10e-7;    % half-sine duration [s]
 
 % --- Integration ---
 cfg.dt      = 0.5e-8;
-cfg.tmax    = (1e-3)/2;
+cfg.tmax    = (1e-3)/20;
 cfg.RelTol  = 1e-9;               % ode15s, ROM
 cfg.RelTolFOM = 1e-10;            % ode15s, FOM (tighter reference)
 cfg.output_stride = 10;           % output every N steps of dt (common grid)
@@ -290,13 +342,19 @@ save(fullfile(save_dir, 'run_config.mat'), ...
     'iface_blocks', 'Eref', 't_common', 'n_dofs_fom', 'k_base', ...
     'N_fom', 'cinfo');
 
+
+% Damping cases, read once: the ROM sweep below needs them even when the FOM
+% is switched off.
+[Q_pairs, f_anchor] = damping_spec(cfg);
+
 %% --- 6. FOM -----------------------------------------------------------
 if cfg.run.FOM
     fprintf('\n=========================================\n');
     fprintf('                 FOM\n');
     fprintf('=========================================\n');
-    for Q = cfg.array_QFactor
-        Struct.compute_rayleigh_damping(Q, Q);
+    for i_Q = 1:size(Q_pairs, 2)
+        Q = Q_pairs(1, i_Q);            % also the tag carried by the file name
+        Struct.compute_rayleigh_damping(Q_pairs(1, i_Q), Q_pairs(2, i_Q), f_anchor);
         Cc = Struct.AssemblyObj.constrain_matrix(Struct.C);
 
         for k_mult = cfg.array_k_mult
@@ -318,7 +376,7 @@ if cfg.run.FOM
             y_contact = extract_contact_response(Struct, Interfaces, active_labels, q);
 
             model = 'FOM'; n_modes = n_dofs_fom; offline_time = 0;
-            save(fullfile(save_dir, sprintf('FOM_Q%04d_K%g.mat', Q, k_mult)), ...
+            save(fullfile(save_dir, sprintf('FOM_Q%g_K%g.mat', Q, k_mult)), ...
                 't', 'y_contact', 'Interfaces', 'cpu_time', 'offline_time', ...
                 'model', 'n_modes', 'Q', 'k_mult');
         end
@@ -340,21 +398,24 @@ if ~isempty(rom_list)
     fprintf('=========================================\n');
 end
 
-for Q = cfg.array_QFactor
+for i_Q = 1:size(Q_pairs, 2)
+    Q = Q_pairs(1, i_Q);                % also the tag carried by the file name
 
     % compute_rayleigh_damping does two things:
     %   (a) updates Struct.C            -> used by the penalty ROMs (MT/MC/Rubin)
     %   (b) returns alpha and beta      -> used by the massless ROMs, which
     %       build an equivalent diagonal modal damping from them
     % Using the same alpha/beta keeps the damping identical across all ROMs.
-    [~, alpha_ray, beta_ray] = Struct.compute_rayleigh_damping(Q, Q);
+    [~, alpha_ray, beta_ray] = Struct.compute_rayleigh_damping( ...
+        Q_pairs(1, i_Q), Q_pairs(2, i_Q), f_anchor);
     rayleigh = struct('alpha', alpha_ray, 'beta', beta_ray);
 
-    % Diagnostic: Rayleigh damping overdamps the high modes.
+    % Diagnostic: the anchors fix alpha and beta, everything else is extrapolated.
     w_hi = 2*pi * Struct.frequencies(max_phi);
     z_hi = 0.5*(alpha_ray/w_hi + beta_ray*w_hi);
-    fprintf('  zeta(mode %d) = %.4f | target zeta (modes 1-2) = %.4f\n', ...
-        max_phi, z_hi, 1/(2*Q));
+    fprintf('  zeta(mode %d, %.4g Hz) = %.4f | requested zeta at the anchors = %.4f, %.4f\n', ...
+        max_phi, Struct.frequencies(max_phi), z_hi, ...
+        1/(2*Q_pairs(1, i_Q)), 1/(2*Q_pairs(2, i_Q)));
     if z_hi > 1
         warning('MAIN:Overdamped', ...
             ['Rayleigh makes the high modes OVERDAMPED (zeta_%d = %.2f). ' ...
@@ -459,13 +520,36 @@ for Q = cfg.array_QFactor
                             pencil = [];
                         end
 
+                        do_static = isfield(cfg.interface_reduction, 'static_correction') && ...
+                                    cfg.interface_reduction.static_correction;
+
+                        % Optional equal split of the CC modes over the faces
+                        % (see the config header). Balanced when n_cc is not a
+                        % multiple of the face count.
+                        cc_alloc = [];
+                        if isfield(cfg.interface_reduction, 'equal_per_face') && ...
+                                cfg.interface_reduction.equal_per_face && ...
+                                strcmpi(cfg.interface_reduction.mode, 'per_interface')
+                            nf = numel(iface_blocks);
+                            base = floor(n_cc / nf);
+                            r    = n_cc - base*nf;
+                            cc_alloc = base * ones(1, nf);
+                            cc_alloc(1:r) = cc_alloc(1:r) + 1;
+                        end
+
                         [Mr_v, Kr_v, Cr_v, Phi_CC, ir_info] = interface_reduction( ...
                             Mr, Kr, Cr, rom.n_bnd, n_cc, ...
-                            cfg.interface_reduction.mode, iface_blocks, pencil);
+                            cfg.interface_reduction.mode, iface_blocks, pencil, do_static, cc_alloc);
                         ir_mode = ir_info.mode;
                         switch ir_mode
                             case 'global',        model_tag = [model 'IRG'];
                             case 'per_interface', model_tag = [model 'IRP'];
+                        end
+                        % The correction changes the model, so it must change
+                        % the file name too, or a corrected and an uncorrected
+                        % run write the same file and one overwrites the other.
+                        if isfield(ir_info, 'R_res') && ~isempty(ir_info.R_res)
+                            model_tag = [model_tag 'SC'];
                         end
 
                         % T_CC' applied to the projected forcing, without forming
@@ -556,6 +640,13 @@ for Q = cfg.array_QFactor
                         % rescaling of its own: the scaling of its basis is
                         % already inside Pc and the operator picks it up.
                         N_run = N_fom * Pc;
+
+                        % Interface-coordinate contact operator, captured before
+                        % the CC reduction: it is the right map for the
+                        % compliance, which lives in the ROM's interface
+                        % coordinates and not in the physical ones.
+                        Nb_rom = N_run(:, 1:rom.n_bnd);
+
                         if n_cc > 0
                             % T_CC = blkdiag(Phi_CC, I), applied on the right
                             % without ever forming it.
@@ -563,8 +654,18 @@ for Q = cfg.array_QFactor
                                      N_run(:, rom.n_bnd+1:end)];
                         end
 
+                        % Compliance the truncation removed, mapped onto the
+                        % contact constraints. Empty unless the correction was
+                        % asked for, in which case the plain penalty law applies.
+                        Scomp = [];
+                        if n_cc > 0 && isfield(ir_info, 'R_res') && ~isempty(ir_info.R_res)
+                            Scomp = full(Nb_rom * ir_info.R_res * Nb_rom');
+                            Scomp = (Scomp + Scomp') / 2;
+                        end
+
                         solver = TransientSolverOde(Mr_v, Kr_v, Cr_v);
                         [t, q_rom] = solver.solve(cfg.tmax, cfg.dt, q0_r, qd0_r, F_handle, ...
+                            'ContactCompliance', Scomp, ...
                             'ContactOperator', N_run, ...
                             'ContactGap',      gaps_array, ...
                             'ContactPenalty',  k_contact, ...
@@ -589,10 +690,10 @@ for Q = cfg.array_QFactor
 
                     n_modes = phi;
                     if n_cc == 0
-                        file_name = sprintf('ROM_%s_Phi%03d_Q%04d_K%g.mat', ...
+                        file_name = sprintf('ROM_%s_Phi%03d_Q%g_K%g.mat', ...
                                             model_tag, phi, Q, k_mult);
                     else
-                        file_name = sprintf('ROM_%s_Phi%03d_CC%03d_Q%04d_K%g.mat', ...
+                        file_name = sprintf('ROM_%s_Phi%03d_CC%03d_Q%g_K%g.mat', ...
                                             model_tag, phi, n_cc, Q, k_mult);
                     end
                     save(fullfile(save_dir, file_name), ...

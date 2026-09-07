@@ -46,21 +46,27 @@ function run_rom_sweep(Struct, contact, shock, cfg, run_dir)
         fprintf('  done in %.1f s\n', toc(tic_g));
     end
 
-    for Q = cfg.array_QFactor
+    [Q_pairs, f_anchor] = damping_spec(cfg);
+    for i_Q = 1:size(Q_pairs, 2)
+        Q = Q_pairs(1, i_Q);            % also the tag carried by the file name
 
         % compute_rayleigh_damping does two things: it updates Struct.C, used
         % by the penalty ROMs, and it returns alpha and beta, from which the
         % massless ROMs build an equivalent diagonal modal damping. Using the
         % same pair keeps the damping identical across all methods.
-        [~, alpha_ray, beta_ray] = Struct.compute_rayleigh_damping(Q, Q);
+        [~, alpha_ray, beta_ray] = Struct.compute_rayleigh_damping( ...
+            Q_pairs(1, i_Q), Q_pairs(2, i_Q), f_anchor);
         rayleigh = struct('alpha', alpha_ray, 'beta', beta_ray);
 
-        % Rayleigh overdamps the high modes. Worth knowing before reading any
-        % convergence plot, because it affects every method equally.
+        % Rayleigh fixes alpha and beta from two anchors and extrapolates the
+        % rest, so the damping at the highest retained mode is a consequence,
+        % never a choice. Worth printing before reading any convergence plot,
+        % because it affects every method equally.
         w_hi = 2*pi * Struct.frequencies(max_phi);
         z_hi = 0.5*(alpha_ray/w_hi + beta_ray*w_hi);
-        fprintf('  zeta(mode %d) = %.4f | target zeta (modes 1-2) = %.4f\n', ...
-            max_phi, z_hi, 1/(2*Q));
+        fprintf('  zeta(mode %d, %.4g Hz) = %.4f | requested zeta at the anchors = %.4f, %.4f\n', ...
+            max_phi, Struct.frequencies(max_phi), z_hi, ...
+            1/(2*Q_pairs(1, i_Q)), 1/(2*Q_pairs(2, i_Q)));
         if z_hi > 1
             warning('ROMSWEEP:Overdamped', ...
                 'Rayleigh makes the high modes OVERDAMPED (zeta_%d = %.2f).', ...
@@ -170,15 +176,41 @@ function ir = apply_interface_reduction(Mr, Kr, Cr, F_r_full, rom, model, ...
         pencil = [];
     end
 
+    do_static = isfield(cfg.interface_reduction, 'static_correction') && ...
+                cfg.interface_reduction.static_correction;
+
+    % Optional: give every contact face the same number of CC modes, instead of
+    % letting the frequency pooling decide the split. n_cc is distributed as
+    % evenly as possible over the faces (exactly equal when it is a multiple of
+    % their number), so "k modes per interface" is array_ccModes = k*n_faces.
+    cc_alloc = [];
+    equal_pf = isfield(cfg.interface_reduction, 'equal_per_face') && ...
+               cfg.interface_reduction.equal_per_face;
+    if equal_pf && strcmpi(cfg.interface_reduction.mode, 'per_interface')
+        nf = numel(contact.blocks);
+        base = floor(n_cc / nf);
+        rem  = n_cc - base*nf;                 % spread the remainder one-each
+        cc_alloc = base * ones(1, nf);
+        cc_alloc(1:rem) = cc_alloc(1:rem) + 1; % faces are ordered as in contact.blocks
+    end
+
     [ir.M, ir.K, ir.C, ir.Phi_CC, ir.info] = interface_reduction( ...
         Mr, Kr, Cr, rom.n_bnd, n_cc, cfg.interface_reduction.mode, ...
-        contact.blocks, pencil);
+        contact.blocks, pencil, do_static, cc_alloc);
 
     ir.mode = ir.info.mode;
     switch ir.mode
         case 'global',        ir.tag = [model 'IRG'];
         case 'per_interface', ir.tag = [model 'IRP'];
         otherwise,            ir.tag = [model 'IR'];
+    end
+    % The correction changes the model, so it must change the file name too:
+    % without this the corrected and uncorrected runs write the SAME file and
+    % the second silently overwrites the first. The suffix is letters only,
+    % which is what the post-processing method parser accepts, so a corrected
+    % run simply appears as its own method next to the plain one.
+    if ~isempty(ir.info) && isfield(ir.info, 'R_res') && ~isempty(ir.info.R_res)
+        ir.tag = [ir.tag 'SC'];
     end
 
     % T_CC' applied to the projected forcing, without forming T_CC: it is
@@ -193,13 +225,31 @@ function [t, q] = integrate_penalty(ir, rom, contact, Pc, n_cc, z0, ...
 %INTEGRATE_PENALTY Penalty contact with ode15s, one path for every method.
 
     N_run = contact.N * Pc;
+
+    % Operator mapping the ROM's INTERFACE coordinates onto the constraints,
+    % captured before the CC reduction is applied to it. It is the right map for
+    % the compliance below: R_res comes out of the interface pencil, so it lives
+    % in the ROM's interface coordinates, which for a scaled basis such as
+    % Rubin's are NOT the physical ones. Using the physical contact operator
+    % here silently produced a compliance twelve orders of magnitude too small.
+    Nb_rom = N_run(:, 1:rom.n_bnd);
+
     if n_cc > 0
         % Right-multiplication by T_CC = blkdiag(Phi_CC, I), never formed.
         N_run = [N_run(:, 1:rom.n_bnd) * ir.Phi_CC, N_run(:, rom.n_bnd+1:end)];
     end
 
+    % Compliance of the interface content removed by the truncation, mapped onto
+    % the contact constraints: one row and column per constraint.
+    Scomp = [];
+    if n_cc > 0 && isfield(ir.info, 'R_res') && ~isempty(ir.info.R_res)
+        Scomp = full(Nb_rom * ir.info.R_res * Nb_rom');
+        Scomp = (Scomp + Scomp') / 2;
+    end
+
     solver = TransientSolverOde(ir.M, ir.K, ir.C);
     [t, q] = solver.solve(cfg.tmax, cfg.dt, z0, z0, F_handle, ...
+        'ContactCompliance', Scomp, ...
         'ContactOperator', N_run, ...
         'ContactGap',      contact.gaps, ...
         'ContactPenalty',  k_contact, ...
@@ -262,9 +312,9 @@ function save_rom_result(run_dir, contact, model, ir, phi, n_cc, Q, k_mult, ...
     n_modes      = phi;
 
     if n_cc == 0
-        fname = sprintf('ROM_%s_Phi%03d_Q%04d_K%g.mat', ir.tag, phi, Q, k_mult);
+        fname = sprintf('ROM_%s_Phi%03d_Q%g_K%g.mat', ir.tag, phi, Q, k_mult);
     else
-        fname = sprintf('ROM_%s_Phi%03d_CC%03d_Q%04d_K%g.mat', ...
+        fname = sprintf('ROM_%s_Phi%03d_CC%03d_Q%g_K%g.mat', ...
             ir.tag, phi, n_cc, Q, k_mult);
     end
 
