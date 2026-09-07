@@ -41,7 +41,9 @@ legend('Location', 'northwest');
 H_values = [3, 7, 15, 31];
 colors = lines(length(H_values));
 
-% Conversion factor from in-lbf to Joules
+% The model is in SI, so hb_solver.energies is already in Joules, while the
+% paper (Kuether et al., IMAC 2014, Fig. 28.3) uses in-lbf on the x-axis:
+% divide by this factor to move from J to in-lbf.
 in_lbf_to_joules = 0.1129848;
 
 % Create the main figure
@@ -60,12 +62,12 @@ for i = 1:length(H_values)
     % We use 1024 time samples (Ntd) for a highly accurate Alternating Frequency/Time (AFT) scheme
     hb_solver.solve(1, -5, 2, current_H, 1024);
     
-    % Convert the extracted energies to Joules
-    energies_J = hb_solver.energies * in_lbf_to_joules;
-    
+    % Convert the extracted energies from Joules to in-lbf (paper units)
+    energies_in_lbf = hb_solver.energies / in_lbf_to_joules;
+
     % Plot the data using a logarithmic scale for the X-axis
     display_name = sprintf('HB (H = %d)', current_H);
-    semilogx(energies_J, hb_solver.frequencies, ...
+    semilogx(energies_in_lbf, hb_solver.frequencies, ...
         '-', 'LineWidth', 2, 'Color', colors(i,:), 'DisplayName', display_name);
     
     drawnow; % Update the plot in real-time
@@ -73,9 +75,10 @@ end
 
 % Final plot formatting
 set(gca, 'XScale', 'log'); % Explicitly enforce logarithmic scale on the X-axis
-ylim([30, 65]); 
+xlim([1e-6, 1e2]);         % same window as Fig. 28.3 of the paper
+ylim([30, 65]);
 title('NNM Convergence by Varying Harmonics (HB)', 'FontSize', 12);
-xlabel('Energy [J]', 'FontSize', 11);
+xlabel('Energy [in-lbf]', 'FontSize', 11);
 ylabel('Frequency [Hz]', 'FontSize', 11);
 legend('Location', 'northwest', 'FontSize', 11);
 

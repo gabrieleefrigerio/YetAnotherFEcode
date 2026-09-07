@@ -167,7 +167,11 @@ classdef NNMContinuation_new < handle
                 ys(nnorm) = ys_nnorm_i;
 
                 qi = ys(1:m);
-                vi = ys(m+1:end);
+                % NLvib normalises time as tau = Om*t inside shooting_residual,
+                % so the velocity stored in the state vector is dq/dtau:
+                % multiply by Om to recover the physical velocity, otherwise the
+                % kinetic energy is wrong by a factor Om^2.
+                vi = ys(m+1:end) * om_sh(i);
 
                 obj.modal_amplitudes(:, i) = abs(qi);
                 x_full = obj.P * qi;
@@ -227,8 +231,8 @@ classdef NNMContinuation_new < handle
             ys(nnorm) = ys_nnorm_i;
             
             q0 = ys(1:m);
-            v0 = ys(m+1:end);
-            
+            v0 = ys(m+1:end) * om_sh;   % state holds dq/dtau, see compute_energies
+
             T = 2 * pi / om_sh;
             t_span = linspace(0, T, 500);
             
