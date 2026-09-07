@@ -65,15 +65,37 @@ classdef RomMN < handle
             Phi = Phi(:, sort_idx);
 
             % ---------- 2. Rigid body mode guard ----------
-            % MacNeal needs a non-singular K (it uses F = inv(K)) and omega != 0.
-            w2_scale = max(abs(w2));
-            rb_idx = find(w2 < 1e-8 * w2_scale);
+            % MacNeal needs a non-singular K (it uses F = inv(K)), so a rigid
+            % body motion is fatal. A rigid body mode is one in the NULL SPACE
+            % OF K, and that is what gets tested here.
+            %
+            % The previous test compared the lowest retained eigenvalue with the
+            % highest, flagging w2 < 1e-8*max(w2). That is a comparison between
+            % two ELASTIC modes whenever there is no rigid motion at all, so it
+            % turns into a false positive as soon as the basis spans more than
+            % four decades of frequency - which a few hundred modes routinely
+            % do. It rejected a perfectly legitimate 4982 Hz mode on the 2D
+            % model for no reason other than the basis being wide.
+            %
+            % ||K*phi|| / (||K||*||phi||) is dimensionless and scale free, so it
+            % behaves the same in the SI and the um/MPa/kg systems: a genuine
+            % rigid mode sits at round-off, an elastic one does not.
+            % Threshold placed between the two populations, not at the edge of
+            % one of them: measured on the 2D model with 300 modes, the LOWEST
+            % legitimate elastic mode sits at 1.3e-10 while a true null-space
+            % vector sits at round-off, about 1e-16. 1e-13 is three orders above
+            % the second and three below the first.
+            Kn   = normest(Kc, 1e-3);
+            rres = vecnorm(Kc*Phi) ./ (Kn * vecnorm(Phi) + realmin);
+            rb_idx = find(rres < 1e-13);
             if ~isempty(rb_idx)
                 error('RomMN:RigidBodyModes', ...
-                    ['Found %d modes at near-zero frequency (omega^2 = %.3e). ' ...
-                     'MacNeal cannot be applied directly when rigid body motions are present. ' ...
-                     'Remove the rigid body motions or add artificial boundary stiffness ' ...
-                     '(see Sec. 5.1.1 of the paper).'], numel(rb_idx), w2(1));
+                    ['Found %d rigid body mode(s): K*phi is zero to round-off ' ...
+                     '(relative residual %.3e) at f = %.4g Hz.\n' ...
+                     'MacNeal cannot be applied when rigid body motions are ' ...
+                     'present: constrain the model, or add artificial boundary ' ...
+                     'stiffness (Sec. 5.1.1 of the paper).'], ...
+                    numel(rb_idx), min(rres), sqrt(max(w2(rb_idx),0))/(2*pi));
             end
             obj.omega2 = w2;
 
@@ -153,11 +175,16 @@ classdef RomMN < handle
             K_cond = (K_cond + K_cond')/2;
 
             f_cond = sort(sqrt(abs(eig(K_cond))))/(2*pi);   % M = I on the modal block
-            fprintf('\n  --- Condensed ROM (open contact, M = I) ---\n');
-            for i = 1:min(5, numel(f_cond))
-                fprintf('  f%d: ROM = %.4e | FOM = %.4e | err = %+.1f%%\n', ...
-                    i, f_cond(i), obj.Structure.frequencies(i), ...
-                    100*(f_cond(i)/obj.Structure.frequencies(i) - 1));
+            % The reference list is only as long as the modal analysis that was
+            % actually run, which is not guaranteed to reach five modes.
+            n_show = min([5, numel(f_cond), numel(obj.Structure.frequencies)]);
+            if n_show > 0
+                fprintf('\n  --- Condensed ROM (open contact, M = I) ---\n');
+                for i = 1:n_show
+                    fprintf('  f%d: ROM = %.4e | FOM = %.4e | err = %+.1f%%\n', ...
+                        i, f_cond(i), obj.Structure.frequencies(i), ...
+                        100*(f_cond(i)/obj.Structure.frequencies(i) - 1));
+                end
             end
 
             % ---------- 7. Modal damping ----------

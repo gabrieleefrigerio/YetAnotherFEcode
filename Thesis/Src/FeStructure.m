@@ -463,15 +463,78 @@ classdef FeStructure < handle
             end
         end
 
-        function [C, alpha_ray, beta_ray] = compute_rayleigh_damping(obj, Q1, Q2)
+        function [C, alpha_ray, beta_ray] = compute_rayleigh_damping(obj, Q1, Q2, f_anchor)
             % COMPUTE_RAYLEIGH_DAMPING Rayleigh damping from two quality factors.
+            %
+            %   compute_rayleigh_damping(Q1, Q2)
+            %   compute_rayleigh_damping(Q1, Q2, [fa fb])
+            %
+            % Q1 is the quality factor AT fa and Q2 the one AT fb, both in Hz.
+            % Omitting f_anchor anchors on the first two natural frequencies,
+            % which is what every earlier run did and is kept as the default so
+            % those results stay reproducible.
+            %
+            % WHY THE ANCHORS MATTER. C = alpha*M + beta*K gives
+            %
+            %       1/Q(f) = alpha/(2*pi*f) + 2*pi*f*beta
+            %
+            % so the two anchors fix alpha and beta and EVERYTHING ELSE IS
+            % EXTRAPOLATION. Anchoring on modes 1 and 2 of the 3D model puts
+            % both of them at 7.08 and 7.83 kHz, ten per cent apart: asking for
+            % Q = 1000 there silently produces Q = 15 at 1 MHz and Q = 3 at
+            % 5 MHz, which is 17% of critical on exactly the frequencies the
+            % contact excites. Nobody chose that, it fell out of the fit.
+            % Passing f_anchor lets the two coefficients be pinned where the
+            % physics is, e.g. [30e3 5e6] with Q = [300 5000].
+            %
+            % The anchors are FREQUENCIES and never mode indices. Rayleigh gives
+            %
+            %       Phi' C Phi = alpha*I + beta*diag(w_n^2)
+            %
+            % hence zeta_n = alpha/(2*w_n) + beta*w_n/2, in which the mode index
+            % has cancelled: the damping depends on the frequency alone. A mode
+            % index would only be a way of NAMING a frequency through the
+            % spectrum, and a poor one up high, where the number of modes below
+            % f grows like f^3 and locating a 5 MHz anchor would mean computing
+            % tens of thousands of them to extract a single value of zeta.
+            %
+            % The map (zeta1, zeta2) -> (alpha, beta) is linear and invertible,
+            % so any pair is reachable from any two distinct anchors. Choosing
+            % the anchors changes nothing about what CAN be represented, only
+            % about which numbers you have to write to get there.
+            %
             % Also returns alpha and beta, which the massless ROMs use to build
             % an equivalent diagonal modal damping.
             if isempty(obj.frequencies) || length(obj.frequencies) < 2
                 obj.compute_eigenmodes(2);
             end
-            w1 = obj.frequencies(1)*2*pi;   w2 = obj.frequencies(2)*2*pi;
-            z1 = 1/(2*Q1);                  z2 = 1/(2*Q2);
+            if nargin < 4 || isempty(f_anchor)
+                f_anchor = obj.frequencies(1:2);
+                anchor_src = 'modes 1-2';
+            else
+                if numel(f_anchor) ~= 2
+                    error('FeStructure:BadAnchor', ...
+                        'f_anchor must hold exactly two frequencies [Hz], got %d.', ...
+                        numel(f_anchor));
+                end
+                anchor_src = 'user';
+            end
+            if any(~isfinite(f_anchor)) || any(f_anchor <= 0)
+                error('FeStructure:BadAnchorValue', ...
+                    ['Anchor frequencies must be positive and finite, got %s Hz.\n' ...
+                     'A zero anchor usually means the model is UNCONSTRAINED and ' ...
+                     'modes 1-2 are rigid body modes: apply the boundary ' ...
+                     'conditions before asking for the damping, or pass ' ...
+                     'f_anchor explicitly.'], mat2str(f_anchor(:)', 4));
+            end
+            if abs(f_anchor(2) - f_anchor(1)) < eps(max(abs(f_anchor)))
+                error('FeStructure:DegenerateAnchor', ...
+                    ['The two anchors coincide (%.6g Hz): alpha and beta are ' ...
+                     'not separable.'], f_anchor(1));
+            end
+
+            w1 = f_anchor(1)*2*pi;   w2 = f_anchor(2)*2*pi;
+            z1 = 1/(2*Q1);           z2 = 1/(2*Q2);
 
             alpha_ray = (2*w1*w2*(z1*w2 - z2*w1)) / (w2^2 - w1^2);
             beta_ray  = (2*(z2*w2 - z1*w1)) / (w2^2 - w1^2);
@@ -481,10 +544,31 @@ classdef FeStructure < handle
             C = obj.C;
 
             fprintf('\n--- Rayleigh damping ---\n');
-            fprintf('Base frequencies: f1 = %.3f Hz, f2 = %.3f Hz\n', ...
-                obj.frequencies(1), obj.frequencies(2));
-            fprintf('Q1 = %g, Q2 = %g  ->  zeta_1 = %g, zeta_2 = %g\n', Q1, Q2, z1, z2);
-            fprintf('alpha = %e\nbeta  = %e\n', alpha_ray, beta_ray);
+            fprintf('Anchors (%s): f = %.4g Hz (Q = %g), f = %.4g Hz (Q = %g)\n', ...
+                anchor_src, f_anchor(1), Q1, f_anchor(2), Q2);
+            fprintf('alpha = %e | beta = %e\n', alpha_ray, beta_ray);
+            if alpha_ray < 0 || beta_ray < 0
+                warning('FeStructure:NegativeRayleigh', ...
+                    ['alpha or beta came out NEGATIVE: the requested pair is ' ...
+                     'not realisable as a passive Rayleigh damping.']);
+            end
+
+            % The whole point of the anchors is that the rest of the band is
+            % extrapolated, so the extrapolation gets printed instead of being
+            % discovered later in a transient that will not settle. The span
+            % has to reach well past the anchors: pinned on modes 1-2 at 7 kHz
+            % the interesting damage happens at 1-5 MHz, three decades higher.
+            f_top  = max([50*f_anchor(2), 1e3*f_anchor(1), obj.frequencies(end)]);
+            f_show = unique([f_anchor(:)', ...
+                10.^(ceil(log10(f_anchor(1))) : floor(log10(f_top)))]);
+            fprintf('Resulting quality factor over the band:\n');
+            for ff = f_show
+                ww = 2*pi*ff;
+                if any(abs(ff - f_anchor) < 1e-9*ff), mk = '  <- anchor'; else, mk = ''; end
+                fprintf('   %9.4g Hz  ->  Q = %9.4g   (zeta = %.3e)%s\n', ...
+                    ff, 1/(alpha_ray/ww + beta_ray*ww), ...
+                    0.5*(alpha_ray/ww + beta_ray*ww), mk);
+            end
         end
 
         % =================================================================
@@ -542,6 +626,20 @@ classdef FeStructure < handle
             axis equal; grid on;
             if obj.n_dim == 3, view(3); end
         end
+
+        function conn = plot_connectivity(obj)
+            % PLOT_CONNECTIVITY Node ordering used to draw each element type.
+            % In 3D the full connectivity is handed to YAFEC's PlotMesh, which
+            % extracts the skin itself. Public because the external plotting
+            % helpers need the same ordering to draw on top of the mesh.
+            switch upper(obj.element_type)
+                case 'TRI3',  conn = obj.elements(:, 1:3);
+                case 'TRI6',  conn = obj.elements(:, [1 4 2 5 3 6]);
+                case 'QUAD4', conn = obj.elements(:, 1:4);
+                case 'QUAD8', conn = obj.elements(:, [1 5 2 6 3 7 4 8]);
+                otherwise,    conn = obj.elements;
+            end
+        end
     end
 
     % =====================================================================
@@ -555,19 +653,6 @@ classdef FeStructure < handle
                 error('FeStructure:NoSuchSet', ...
                     'Node set ''%s'' is not defined. Available: %s', ...
                     label, strjoin(obj.set_labels, ', '));
-            end
-        end
-
-        function conn = plot_connectivity(obj)
-            % PLOT_CONNECTIVITY Node ordering used to draw each element type.
-            % In 3D the full connectivity is handed to YAFEC's PlotMesh, which
-            % extracts the skin itself.
-            switch upper(obj.element_type)
-                case 'TRI3',  conn = obj.elements(:, 1:3);
-                case 'TRI6',  conn = obj.elements(:, [1 4 2 5 3 6]);
-                case 'QUAD4', conn = obj.elements(:, 1:4);
-                case 'QUAD8', conn = obj.elements(:, [1 5 2 6 3 7 4 8]);
-                otherwise,    conn = obj.elements;
             end
         end
     end

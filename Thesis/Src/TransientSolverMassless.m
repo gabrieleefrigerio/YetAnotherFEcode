@@ -132,9 +132,9 @@ classdef TransientSolverMassless < handle
         end
 
         % =================================================================
-        function dt_crit = critical_timestep(obj)
+        function [dt_crit, info] = critical_timestep(obj)
             % CRITICAL_TIMESTEP Stability limit of the explicit scheme on the
-            % interior coordinates.
+            % interior coordinates, DAMPING INCLUDED.
             %
             % The boundary does NOT contribute: it is solved quasi-statically.
             % Static condensation of the boundary changes the stiffness seen
@@ -142,14 +142,50 @@ classdef TransientSolverMassless < handle
             %   contact OPEN   : K_eff = Kee - Keb*inv(Kbb)*Kbe   (free edge)
             %   contact CLOSED : K_eff = Kee                      (locked edge)
             % The more restrictive of the two is used.
+            %
+            % DAMPING MATTERS, and an earlier version of this ignored it. For a
+            % central-difference scheme on
+            %       eta'' + 2*zeta*w*eta' + w^2*eta = 0
+            % the limit is
+            %       dt <= (2/w) * ( sqrt(1+zeta^2) - zeta )
+            % which collapses towards 1/(zeta*w) as zeta grows. Rayleigh damping
+            % fitted at the first two modes overdamps the high ones by
+            % construction, so zeta at the top of the retained set is not small:
+            % measured on the 3D model, zeta_max = 0.12 at 20 modes, 0.35 at 50
+            % and 0.80 at 100. Ignoring it made the reported limit optimistic by
+            % 1.13x, 1.41x and 2.07x respectively - i.e. at 100 modes a step
+            % twice the true limit would have passed the check and then blown up.
+            %
+            % With mass-normalized fixed-interface modes Kee is diagonal
+            % (w_k^2) and Dee is diagonal (2*zeta_k*w_k), so in the CLOSED case
+            % the modes are exactly decoupled and the per-mode limit is exact.
+            % In the OPEN case K_eff is not diagonal and does not commute with
+            % Dee, so a conservative bound is used: the largest frequency
+            % against the largest damping ratio.
 
             H = obj.Kbb_fact \ obj.Kbe;                 % inv(Kbb)*Kbe
             Keff_open = obj.Kee - obj.Kbe' * H;
             Keff_open = (Keff_open + Keff_open') / 2;
             Kee_sym   = (obj.Kee + obj.Kee') / 2;
 
-            w2 = max([ max(eig(Keff_open)), max(eig(Kee_sym)) ]);
-            dt_crit = 2 / sqrt(w2);
+            w_max = sqrt(max([ max(eig(Keff_open)), max(eig(Kee_sym)) ]));
+
+            % Modal damping ratios implied by Dee
+            wk = sqrt(max(diag(Kee_sym), 0));
+            zk = zeros(size(wk));
+            ok = wk > 0;
+            zk(ok) = diag(obj.Dee(ok, ok)) ./ (2*wk(ok));
+            z_max = max([0; zk]);
+
+            lim = @(w, z) (2./w) .* (sqrt(1 + z.^2) - z);
+
+            dt_modal = inf;
+            if any(ok), dt_modal = min(lim(wk(ok), zk(ok))); end
+            dt_bound = lim(w_max, z_max);
+            dt_crit  = min(dt_modal, dt_bound);
+
+            info = struct('w_max', w_max, 'zeta_max', z_max, ...
+                          'dt_undamped', 2/w_max, 'dt_crit', dt_crit);
         end
 
         % =================================================================
@@ -167,13 +203,16 @@ classdef TransientSolverMassless < handle
             obj.warned_AL = false;
 
             % ---------- stability check ----------
-            dtc = obj.critical_timestep();
-            fprintf('  [massless] dt = %.3e | dt_crit ~ %.3e | ratio = %.3f\n', ...
-                dt, dtc, dt/dtc);
+            [dtc, dinfo] = obj.critical_timestep();
+            fprintf(['  [massless] dt = %.3e | dt_crit = %.3e | ratio = %.3f\n' ...
+                     '             f_max = %.4g Hz | zeta_max = %.3f | ' ...
+                     'undamped limit would be %.3e (%.2fx optimistic)\n'], ...
+                dt, dtc, dt/dtc, dinfo.w_max/(2*pi), dinfo.zeta_max, ...
+                dinfo.dt_undamped, dinfo.dt_undamped/dtc);
             if dt > dtc
                 warning('TSM:Unstable', ...
-                    ['dt = %.3e EXCEEDS the estimated stability limit %.3e. ' ...
-                     'The scheme will diverge. Reduce dt or numModes.'], dt, dtc);
+                    ['dt = %.3e EXCEEDS the stability limit %.3e (zeta_max = %.2f). ' ...
+                     'The scheme will diverge. Reduce dt or numModes.'], dt, dtc, dinfo.zeta_max);
             end
 
             % ---------- operators of the explicit update ----------
@@ -297,47 +336,78 @@ classdef TransientSolverMassless < handle
     % =====================================================================
     methods (Access = private)
         function [lam, nit, res_rel] = solve_lcp(obj, G, c, lam0)
-            % SOLVE_LCP Solve  0 <= (G*lam + c)  _|_  lam >= 0
-            % via augmented Lagrangian and projected Jacobi (App. C):
-            %   lam <- proj_{R+}( lam - eps_AL*(G*lam + c) )
+            % SOLVE_LCP  lam >= 0,  r = G*lam + c >= 0,  lam'*r = 0.
             %
-            % Stopping on the NORMALIZED KKT RESIDUAL:
-            %   r = || min(lam, G*lam + c) ||_inf / ||c||_inf
-            % A criterion on the increment of lam would be fragile: near the
-            % solution the increment is dominated by round-off and an absolute
-            % threshold is never reached.
+            % DIRECT ACTIVE SET, with projected Jacobi kept only as a fallback.
+            %
+            % This used to be projected Jacobi alone, with the single scalar
+            % step eps = 1/lambda_max(G). That iteration contracts at a rate
+            % 1 - lambda_min/lambda_max, so on an ill-conditioned Delassus
+            % matrix it barely moves: measured on the 3D model with 50 modes it
+            % hit the 1000-iteration cap on essentially EVERY step (mean 995)
+            % and still sat at a relative KKT residual of 1.8e-3, five orders
+            % above the tolerance. The contact was never actually solved.
+            %
+            % The active set is small - at most 80 of 232 constraints on that
+            % model, usually far fewer - so the equality-constrained system on
+            % it is a tiny dense solve, and the exact solution costs a handful
+            % of those. The loop below is the standard primal active-set method
+            % for an LCP with symmetric positive semidefinite G: solve on the
+            % current guess, drop the constraints that pull, add the ones that
+            % penetrate, repeat.
+            n = numel(c);
+            A = lam0 > 0;
+            if ~any(A), A = c < 0; end          % first guess: what is penetrating
 
-            lam = max(lam0, 0);
-            e   = obj.eps_AL;
+            lam = zeros(n, 1);
+            for nit = 1:min(4*n + 20, 500)
+                lam = zeros(n, 1);
+                if any(A)
+                    Ga = G(A, A);
+                    % G is only positive SEMIdefinite: a tiny shift keeps the
+                    % solve well posed when two constraints are redundant.
+                    sh = 1e-12 * (trace(Ga)/nnz(A) + realmin);
+                    lam(A) = (Ga + sh*eye(nnz(A))) \ (-c(A));
+                end
+                r = G*lam + c;
 
-            % Reference scale = magnitude of the right-hand side (predicted gap)
-            scale = norm(c, inf);
-            if scale < 1e-16
-                scale = 1;      % floor: avoid dividing by ~0
+                drop = A & (lam < 0);           % pulling: cannot be in contact
+                add  = ~A & (r  < 0);           % penetrating: must be
+                if ~any(drop) && ~any(add)
+                    lam = max(lam, 0);
+                    res_rel = obj.kkt_residual(G, c, lam);
+                    return
+                end
+                A(drop) = false;
+                A(add)  = true;
             end
 
-            res_rel = Inf;
-
-            for nit = 1:obj.max_iter_AL
-                r   = G*lam + c;
-                res_rel = norm(min(lam, r), inf) / scale;
-
-                if res_rel <= obj.tol_AL
-                    return;
-                end
-
+            % Cycling is possible in degenerate configurations. Fall back to the
+            % iteration that cannot cycle, warm started from where we got to.
+            lam = max(lam, 0);
+            e = obj.eps_AL;
+            for k = 1:obj.max_iter_AL
+                r = G*lam + c;
+                if obj.kkt_residual(G, c, lam) <= obj.tol_AL, break; end
                 lam = max(lam - e*r, 0);
             end
+            nit = nit + k;
+            res_rel = obj.kkt_residual(G, c, lam);
 
-            % Genuine non-convergence: warn ONCE per simulation
-            if ~obj.warned_AL
+            if res_rel > obj.tol_AL && ~obj.warned_AL
                 warning('TSM:ALNoConv', ...
-                    ['Augmented Lagrangian: %d iterations without convergence. ' ...
-                     'Relative KKT residual = %.3e (tol = %.1e). ' ...
-                     'This warning is issued only once per simulation.'], ...
-                    obj.max_iter_AL, res_rel, obj.tol_AL);
+                    ['Contact solver did not converge: relative KKT residual ' ...
+                     '= %.3e (tol = %.1e). This warning is issued only once ' ...
+                     'per simulation.'], res_rel, obj.tol_AL);
                 obj.warned_AL = true;
             end
+        end
+
+        function res_rel = kkt_residual(~, G, c, lam)
+            r = G*lam + c;
+            scale = norm(c, inf);
+            if scale < 1e-16, scale = 1; end
+            res_rel = norm(min(lam, r), inf) / scale;
         end
     end
 end
