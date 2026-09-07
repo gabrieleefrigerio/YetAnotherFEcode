@@ -1,0 +1,11 @@
+rom,T_0p1_us,cens_0p1,inside_0p1,T_1_us,cens_1,inside_1,T_10_us,cens_10,inside_10
+RubinIRP Phi200 CC10,50,1,1,50,1,1,50,1,1
+RubinIRP Phi200 CC20,50,1,1,50,1,1,50,1,1
+RubinIRP Phi200 CC40,50,1,1,50,1,1,50,1,1
+RubinIRP Phi200 CC81,50,1,1,50,1,1,50,1,1
+RubinIRP Phi300 CC10,50,1,1,50,1,1,50,1,1
+RubinIRP Phi300 CC20,50,1,1,50,1,1,50,1,1
+RubinIRP Phi300 CC40,50,1,1,50,1,1,50,1,1
+RubinIRP Phi300 CC81,50,1,1,50,1,1,50,1,1
+Rubin Phi200,50,1,1,50,1,1,50,1,1
+Rubin Phi300,50,1,1,50,1,1,50,1,1

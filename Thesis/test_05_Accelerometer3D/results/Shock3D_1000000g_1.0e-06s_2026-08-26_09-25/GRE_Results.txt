@@ -1,0 +1,24 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & TIME REPORT - 3D
+======================================================
+ Interfaces: stop_A_top, stop_A_bot, stop_B_top, stop_B_bot, stop_C_top, stop_C_bot, stop_D_top, stop_D_bot
+ Reference metric: GRE_full (window 25%)
+ Integration floor: 3.00e-05 %
+ Eref = 1.4948e+05
+
+>>> CASE: Q = 100000 | k_mult = 0.003125 <<<
+  CB        Phi 050 | CC   - | GRE_full    1.8660% | GRE_win    0.0031% | Off     3.0s | On    65.1s
+  CB        Phi 090 | CC   - | GRE_full    0.4592% | GRE_win    0.0008% | Off     3.9s | On    90.6s
+  CB        Phi 200 | CC   - | GRE_full    0.3661% | GRE_win    0.0002% | Off     7.1s | On   141.4s
+  MT        Phi 050 | CC   - | GRE_full    4.2619% | GRE_win    0.0083% | Off     2.7s | On     0.3s
+  MT        Phi 090 | CC   - | GRE_full    1.5978% | GRE_win    0.0028% | Off     6.0s | On     2.0s
+  MT        Phi 200 | CC   - | GRE_full    0.9375% | GRE_win    0.0007% | Off    22.3s | On     7.7s
+  Rubin     Phi 050 | CC   - | GRE_full    0.8708% | GRE_win    0.0011% | Off     3.4s | On    67.9s
+  Rubin     Phi 090 | CC   - | GRE_full    0.3751% | GRE_win    0.0003% | Off     4.3s | On    83.3s
+  Rubin     Phi 200 | CC   - | GRE_full    0.0328% | GRE_win    0.0000% | Off     7.6s | On   128.1s
+
+
+--- Observed convergence order (GRE_full ~ phi^-p) ---
+  CB       : p = 1.12   (3 points)
+  MT       : p = 1.07   (3 points)
+  Rubin    : p = 2.41   (3 points)

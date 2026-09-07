@@ -1,0 +1,43 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & TIME REPORT
+======================================================
+ Interfaces: R
+ Reference metric: GRE_full (window 25%)
+ Integration floor: 3.00e-05 %
+ Eref = 1.1514e-09 J
+
+>>> CASE: Q = 1000 | k_mult = 10 <<<
+  RubinIRP  Phi 200 | CC  10 | GRE_full    0.0456% | GRE_win    0.0861% | Off   1.50s | On  38.17s
+                 within 1%: >50.000 us  (inside 100%)
+  RubinIRP  Phi 200 | CC  20 | GRE_full    0.0144% | GRE_win    0.0273% | Off   1.52s | On  33.50s
+                 within 1%: >50.000 us  (inside 100%)
+  RubinIRP  Phi 200 | CC  40 | GRE_full    0.0037% | GRE_win    0.0072% | Off   1.53s | On  52.49s
+                 within 1%: >50.000 us  (inside 100%)
+  RubinIRP  Phi 200 | CC  81 | GRE_full    0.0005% | GRE_win    0.0009% | Off   1.54s | On  76.84s  [!] close to the integration floor
+                 within 1%: >50.000 us  (inside 100%)
+  RubinIRP  Phi 300 | CC  10 | GRE_full    0.0460% | GRE_win    0.0868% | Off   3.22s | On  70.23s
+                 within 1%: >50.000 us  (inside 100%)
+  RubinIRP  Phi 300 | CC  20 | GRE_full    0.0148% | GRE_win    0.0280% | Off   3.23s | On  74.29s
+                 within 1%: >50.000 us  (inside 100%)
+  RubinIRP  Phi 300 | CC  40 | GRE_full    0.0040% | GRE_win    0.0079% | Off   3.25s | On  79.59s
+                 within 1%: >50.000 us  (inside 100%)
+  RubinIRP  Phi 300 | CC  81 | GRE_full    0.0001% | GRE_win    0.0002% | Off   3.26s | On 108.08s  [!] close to the integration floor
+                 within 1%: >50.000 us  (inside 100%)
+  Rubin     Phi 200 | CC   - | GRE_full    0.0005% | GRE_win    0.0009% | Off   1.47s | On  80.10s  [!] close to the integration floor
+                 within 1%: >50.000 us  (inside 100%)
+  Rubin     Phi 300 | CC   - | GRE_full    0.0001% | GRE_win    0.0002% | Off   3.18s | On 114.02s  [!] close to the integration floor
+                 within 1%: >50.000 us  (inside 100%)
+
+
+--- Tracking time ---
+ROM                           < 0.1%        < 1%       < 10%
+RubinIRP Phi200 CC10      >50.000us  >50.000us  >50.000us
+RubinIRP Phi200 CC20      >50.000us  >50.000us  >50.000us
+RubinIRP Phi200 CC40      >50.000us  >50.000us  >50.000us
+RubinIRP Phi200 CC81      >50.000us  >50.000us  >50.000us
+RubinIRP Phi300 CC10      >50.000us  >50.000us  >50.000us
+RubinIRP Phi300 CC20      >50.000us  >50.000us  >50.000us
+RubinIRP Phi300 CC40      >50.000us  >50.000us  >50.000us
+RubinIRP Phi300 CC81      >50.000us  >50.000us  >50.000us
+Rubin Phi200              >50.000us  >50.000us  >50.000us
+Rubin Phi300              >50.000us  >50.000us  >50.000us

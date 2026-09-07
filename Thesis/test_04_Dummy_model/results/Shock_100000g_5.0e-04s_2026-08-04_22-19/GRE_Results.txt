@@ -1,0 +1,24 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & TIME REPORT
+======================================================
+ Interfaces: T, B, L, R
+ Reference metric: GRE_full (window 25%)
+ Integration floor: 3.00e-05 %
+ Eref = 1.1514e-09 J
+
+>>> CASE: Q = 1000 | k_mult = 10 <<<
+  MC     Phi 050 | GRE_full   44.0633% | GRE_win    1.8775% | Off   0.27s | On  35.65s
+  MC     Phi 150 | GRE_full    7.4276% | GRE_win    0.0337% | Off   1.30s | On  82.72s
+  MC     Phi 200 | GRE_full    0.3933% | GRE_win    0.0027% | Off   2.45s | On 122.54s
+  MT     Phi 050 | GRE_full   88.8885% | GRE_win   24.6265% | Off   0.17s | On  17.05s
+  MT     Phi 150 | GRE_full   77.9628% | GRE_win   26.1573% | Off   1.03s | On  66.08s
+  MT     Phi 200 | GRE_full   88.3699% | GRE_win   27.1640% | Off   2.07s | On 106.74s
+  Rubin  Phi 050 | GRE_full   44.0621% | GRE_win    1.8776% | Off   0.13s | On  21.72s
+  Rubin  Phi 150 | GRE_full    7.4378% | GRE_win    0.0338% | Off   0.53s | On  57.77s
+  Rubin  Phi 200 | GRE_full    0.3971% | GRE_win    0.0027% | Off   1.08s | On  88.43s
+
+
+--- Observed convergence order (GRE_full ~ phi^-p) ---
+  MC       : p = 2.91   (3 points)
+  MT       : p = 0.04   (3 points)
+  Rubin    : p = 2.90   (3 points)

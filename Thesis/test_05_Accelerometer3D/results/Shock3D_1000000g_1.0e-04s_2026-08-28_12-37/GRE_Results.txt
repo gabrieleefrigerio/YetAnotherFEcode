@@ -1,0 +1,62 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & TIME REPORT - 3D
+======================================================
+ Interfaces: stop_A_top, stop_A_bot, stop_B_top, stop_B_bot, stop_C_top, stop_C_bot, stop_D_top, stop_D_bot
+ Reference metric: GRE_full (window 25%)
+ Integration floor: 3.00e-05 %
+ Eref = 1.4948e+05
+
+>>> CASE: Q = 1000 | k_mult = 0.003125 <<<
+  CBIRG     Phi 050 | CC   4 | GRE_full  164.6300% | GRE_win  100.9954% | Off     3.3s | On    31.9s
+  CBIRG     Phi 050 | CC   8 | GRE_full  100.2362% | GRE_win   84.3998% | Off     3.2s | On    20.7s
+  CBIRG     Phi 050 | CC  16 | GRE_full  104.4337% | GRE_win   12.8369% | Off     3.2s | On    18.8s
+  CBIRG     Phi 050 | CC  32 | GRE_full  132.5874% | GRE_win   35.1334% | Off     3.2s | On    20.0s
+  CBIRG     Phi 050 | CC  64 | GRE_full   55.6391% | GRE_win   10.9956% | Off     3.2s | On    32.3s
+  CBIRG     Phi 050 | CC 128 | GRE_full   60.3163% | GRE_win    5.8392% | Off     3.2s | On    80.1s
+  CBIRG     Phi 050 | CC 232 | GRE_full   63.8808% | GRE_win    6.3314% | Off     3.2s | On   199.1s
+  CBIRG     Phi 090 | CC   4 | GRE_full   99.4592% | GRE_win   98.1795% | Off     4.1s | On    31.7s
+  CBIRG     Phi 090 | CC   8 | GRE_full  150.0621% | GRE_win   78.6990% | Off     4.1s | On    33.3s
+  CBIRG     Phi 090 | CC  16 | GRE_full   63.3481% | GRE_win   17.0646% | Off     4.1s | On    38.1s
+  CBIRG     Phi 090 | CC  32 | GRE_full   59.1048% | GRE_win   23.4343% | Off     4.1s | On    40.2s
+  CBIRG     Phi 090 | CC  64 | GRE_full  127.8083% | GRE_win   11.5363% | Off     4.1s | On    63.1s
+  CBIRG     Phi 090 | CC 128 | GRE_full   28.6652% | GRE_win    4.8106% | Off     4.1s | On   114.0s
+  CBIRG     Phi 090 | CC 232 | GRE_full   27.5410% | GRE_win    1.1578% | Off     4.1s | On   221.6s
+  CBIRG     Phi 200 | CC   4 | GRE_full  145.6670% | GRE_win  102.6868% | Off     8.0s | On    62.8s
+  CBIRG     Phi 200 | CC   8 | GRE_full  149.4493% | GRE_win   79.9034% | Off     8.0s | On    86.5s
+  CBIRG     Phi 200 | CC  16 | GRE_full   90.0259% | GRE_win   17.3985% | Off     8.0s | On    98.8s
+  CBIRG     Phi 200 | CC  32 | GRE_full  114.5776% | GRE_win   17.5663% | Off     8.0s | On   101.7s
+  CBIRG     Phi 200 | CC  64 | GRE_full   74.9056% | GRE_win   12.2281% | Off     8.0s | On   154.6s
+  CBIRG     Phi 200 | CC 128 | GRE_full   27.8251% | GRE_win    4.1535% | Off     8.0s | On   232.5s
+  CBIRG     Phi 200 | CC 232 | GRE_full   12.0400% | GRE_win    0.6059% | Off     8.0s | On   407.5s
+  CB        Phi 050 | CC   - | GRE_full   63.8787% | GRE_win    6.3314% | Off     3.2s | On   243.7s
+  CB        Phi 090 | CC   - | GRE_full   27.5405% | GRE_win    1.1578% | Off     4.1s | On   256.8s
+  CB        Phi 200 | CC   - | GRE_full   12.0385% | GRE_win    0.6059% | Off     8.0s | On   454.4s
+  RubinIRG  Phi 050 | CC   4 | GRE_full  102.5199% | GRE_win  104.2293% | Off     3.5s | On    18.9s
+  RubinIRG  Phi 050 | CC   8 | GRE_full  153.3572% | GRE_win   84.5549% | Off     3.5s | On    20.3s
+  RubinIRG  Phi 050 | CC  16 | GRE_full   44.4930% | GRE_win   16.4340% | Off     3.5s | On    15.6s
+  RubinIRG  Phi 050 | CC  32 | GRE_full  142.8798% | GRE_win   33.3144% | Off     3.5s | On    18.0s
+  RubinIRG  Phi 050 | CC  64 | GRE_full   38.9481% | GRE_win    8.2036% | Off     3.5s | On    29.3s
+  RubinIRG  Phi 050 | CC 128 | GRE_full   37.5623% | GRE_win    9.9144% | Off     3.5s | On    77.8s
+  RubinIRG  Phi 050 | CC 232 | GRE_full   37.6576% | GRE_win    6.7166% | Off     3.5s | On   201.0s
+  RubinIRG  Phi 090 | CC   4 | GRE_full  108.9990% | GRE_win  103.9225% | Off     4.9s | On    16.0s
+  RubinIRG  Phi 090 | CC   8 | GRE_full  161.7976% | GRE_win   79.5938% | Off     4.9s | On    23.4s
+  RubinIRG  Phi 090 | CC  16 | GRE_full   45.8498% | GRE_win   22.3744% | Off     4.9s | On    32.4s
+  RubinIRG  Phi 090 | CC  32 | GRE_full  117.1046% | GRE_win   14.6297% | Off     4.9s | On    33.7s
+  RubinIRG  Phi 090 | CC  64 | GRE_full   66.7701% | GRE_win   15.2726% | Off     4.9s | On    55.5s
+  RubinIRG  Phi 090 | CC 128 | GRE_full   43.1414% | GRE_win    3.5223% | Off     4.9s | On   103.5s
+  RubinIRG  Phi 090 | CC 232 | GRE_full    7.9326% | GRE_win    0.7144% | Off     4.9s | On   226.3s
+  RubinIRG  Phi 200 | CC   4 | GRE_full  112.9436% | GRE_win  103.9395% | Off     8.2s | On    46.6s
+  RubinIRG  Phi 200 | CC   8 | GRE_full  123.1910% | GRE_win   80.4564% | Off     8.2s | On    71.4s
+  RubinIRG  Phi 200 | CC  16 | GRE_full   52.5109% | GRE_win   22.6445% | Off     8.2s | On    95.1s
+  RubinIRG  Phi 200 | CC  32 | GRE_full  114.3514% | GRE_win   15.5652% | Off     8.2s | On    88.5s
+  RubinIRG  Phi 200 | CC  64 | GRE_full  104.0597% | GRE_win   14.5927% | Off     8.2s | On   127.0s
+  RubinIRG  Phi 200 | CC 128 | GRE_full   19.9329% | GRE_win    2.6229% | Off     8.2s | On   205.4s
+  RubinIRG  Phi 200 | CC 232 | GRE_full    1.2131% | GRE_win    0.0090% | Off     8.2s | On   381.6s
+  Rubin     Phi 050 | CC   - | GRE_full   37.6575% | GRE_win    6.7166% | Off     3.5s | On   197.1s
+  Rubin     Phi 090 | CC   - | GRE_full    7.9328% | GRE_win    0.7144% | Off     4.9s | On   220.4s
+  Rubin     Phi 200 | CC   - | GRE_full    1.2138% | GRE_win    0.0090% | Off     8.2s | On   366.9s
+
+
+--- Observed convergence order (GRE_full ~ phi^-p) ---
+  CB       : p = 1.19   (3 points)
+  Rubin    : p = 2.47   (3 points)

@@ -1,0 +1,25 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & TIME REPORT - 3D
+======================================================
+ Interfaces: stop_A_top, stop_A_bot, stop_B_top, stop_B_bot, stop_C_top, stop_C_bot, stop_D_top, stop_D_bot
+ Reference metric: GRE_full (window 25%)
+ Integration floor: 6.10e-06 %
+ Eref = 1.4948e+05
+
+>>> CASE: Q = 1000 | k_mult = 0.003125 <<<
+  MT        Phi 1000 | CC   - | GRE_full   56.4507% | GRE_win   45.3320% | Off   626.7s | On  1721.8s
+               within 1%:  3.22 us  (inside 2%)
+  MT        Phi 2000 | CC   - | GRE_full   48.1025% | GRE_win   38.0525% | Off  2251.5s | On  7910.1s
+               within 1%:  3.26 us  (inside 2%)
+  MT        Phi 500 | CC   - | GRE_full   70.7279% | GRE_win   38.3609% | Off   162.1s | On   399.4s
+               within 1%:  3.20 us  (inside 2%)
+
+
+--- Tracking time ---
+ROM                         < 0.1%        < 1%       < 10%
+MT Phi1000                 0.82us     3.22us     5.80us
+MT Phi2000                 0.82us     3.26us     5.96us
+MT Phi500                  0.82us     3.20us     6.22us
+
+--- Observed convergence order (GRE_full ~ phi^-p) ---
+  MT       : p = 0.28   (3 points)
