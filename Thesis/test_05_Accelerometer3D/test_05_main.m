@@ -146,10 +146,10 @@ for it = 1:size(tab, 1)
 end
 
 % --- Methods to run ---
-cfg.run.FOM   = 1;
+cfg.run.FOM   = 0;
 cfg.run.MT    = 0;
 cfg.run.MC    = 0;
-cfg.run.CB    = 0;
+cfg.run.CB    = 1;
 cfg.run.Rubin = 0;
 cfg.run.MCB   = 0;    % fixed step: see the stability note at the bottom
 cfg.run.MN    = 0;
@@ -167,7 +167,7 @@ cfg.interface_reduction.mode    = 'per_interface';   % 'global' | 'per_interface
 % takes more of them. The total, hence the reduced size and the file name, is
 % array_ccModes either way, so the two are directly comparable in the plots.
 cfg.interface_reduction.equal_per_face = true;
-cfg.interface_reduction.basis   = 'guyan';    % 'guyan'  | 'self'
+cfg.interface_reduction.basis   =  'guyan';    % 'guyan'  | 'self'
 % static_correction = put back what the truncation throws away, instead of
 % pretending it is not there. The CC modes above n_cc sit at 1e8-1e9 Hz against
 % an excitation of about 1 MHz, so they carry no dynamics: they only deflect,
@@ -188,9 +188,30 @@ cfg.interface_reduction.basis   = 'guyan';    % 'guyan'  | 'self'
 %
 % Applies to the penalty methods with interface reduction (CB, Rubin). The
 % massless models (MCB, MN) solve the contact by a different route and ignore it.
-cfg.interface_reduction.static_correction = true;
-cfg.array_ccModes  = [16, 32, 64, 128, 232]; % 232 = n_bnd, the control point
-cfg.array_ccModes  = [64, 128]; % 232 = n_bnd, the control point
+cfg.interface_reduction.static_correction = false;
+% refine = correct the CC BASIS itself instead of the contact law, after Ahn
+% et al., Mech. Syst. Signal Process. 178 (2022) 109265. Also adds NO state:
+% same reduced size as the plain reduction. Independent of static_correction
+% above and composable with it (they touch different things), but on THIS
+% problem it does not help:
+%
+% Measured on the 3D model, CB, basis='self', 10 us (error against the FOM):
+%   n_cc = 16     7.39% -> 9.77%   (worse)
+%   n_cc = 64     5.78% -> 5.38%   (near flat)
+%
+% Checked why: the plain interface reduction is already accurate to 1e-8 on
+% the LINEAR forced response even at n_cc = 8 - there is no linear dynamics
+% left to fix. The paper's own metric (eigenvalue error across the whole
+% spectrum) improves by orders of magnitude, but most of that spectrum is
+% never excited by this shock. All of our error is in the CONTACT, which is
+% exactly what static_correction targets and this does not.
+%
+% Also: derived assuming the CC modes are M-orthogonal in the ROM's own
+% boundary block (basis = 'self'). With basis = 'guyan' - what Rubin needs -
+% that orthogonality does not hold, interface_reduction prints a warning, and
+% the correction is only approximate.
+cfg.interface_reduction.refine = false;
+cfg.array_ccModes  = [16, 32, 64, 128]; % 232 = n_bnd, the control point
 % --- Sweep ---
 cfg.array_linModes = [200];   % 90 is what the previous thesis retained
 % --- Damping ---
@@ -205,9 +226,9 @@ cfg.array_linModes = [200];   % 90 is what the previous thesis retained
 %
 % This is the parametrisation used at TDK. One case only, no sweep: to compare
 % two dampings, run this main once per case.
-cfg.Q_freq         = [7e3, 2e6];    % anchor frequencies [Hz]
-cfg.array_QFactor  = [5,  200];   % Q at 30 kHz, Q at 5 MHz
-% cfg.array_QFactor  = 1000;
+% cfg.Q_freq         = [7e3, 50e6];    % anchor frequencies [Hz]
+% cfg.array_QFactor  = [5,  200];   % Q at 30 kHz, Q at 5 MHz
+cfg.array_QFactor  = 1000;
 cfg.array_k_mult   = 0.003125;  % contact stiffness as a multiple of max(diag(K)).
                               % max(diag(K)) = 1.6008e9 N/m on this model, so
                               % 0.3125 reproduces the 5e8 N/m of the previous
@@ -223,16 +244,34 @@ cfg.t_shock     = 10e-7;      % half-sine duration [s]
 
 % --- Integration ---
 cfg.dt        = 2e-9;
-cfg.tmax      = 1e-4;
+cfg.tmax      = 100e-6;
 cfg.RelTol    = 1e-8;         % ROM
 cfg.RelTolFOM = 1e-8;         % FOM
-% Measured on this model, linear phase, 0.5 us window:
+
+% --- Integrator for the FOM ---
+% 'ode15s'    adaptive, error controlled, factorises a 2n x 2n state-space
+%             Jacobian. The default, and what every earlier run used.
+% 'genalpha'  generalized-alpha, fixed step, n x n iteration matrix. rho_inf
+%             sets the numerical damping of the high frequencies: 1 is none,
+%             0.7 is what the previous thesis used.
+% 'newmark'   Newmark, fixed step. newmark_alpha = 0 is the trapezoidal rule,
+%             conservative in energy and free of numerical damping.
 %
-%   MaxStep = dt, RelTol 1e-8      236 steps,  36 LU,  132.5 s
-%   MaxStep = dt, RelTol 1e-6      141 steps,  27 LU,   96.8 s
-%   no MaxStep,   RelTol 1e-6      125 steps,  26 LU,   91.5 s
-%   no MaxStep,   scalar AbsTol    502 steps,  70 LU,  287.5 s
+% MEASURED on this model, 22302 DOFs, against the stored 24 h ode15s run at
+% RelTol 1e-8, over 3 us with the legacy damping:
 %
+%   genalpha 0.7, h = 1 ns   397 s/us   error 0.0052%
+%   genalpha 0.7, h = 2 ns   184 s/us   error 0.0349%
+%   genalpha 0.7, h = 5 ns    88 s/us   error 0.4427%
+%
+% against 864 s/us for ode15s averaged over 100 us. The usable step depends on
+% the damping: contacts here last about 60 ns, and with the TDK anchors the
+% high frequencies survive and h = 5 ns already merges impacts. Verify the
+% step on a short window before trusting it on a long one.
+cfg.integrator    = 'ode15s';       % 'ode15s' | 'genalpha' | 'newmark'
+cfg.h_int         = 1e-9;           % fixed step of the second-order schemes
+cfg.rho_inf       = 0.7;            % genalpha only
+cfg.newmark_alpha = 0;              % newmark only
 % Three things follow. MaxStep is NOT what limits the step here: removing it
 % saves 11 per cent, so it is kept as cheap insurance for resolving contact
 % events, where it will matter. The energy-weighted AbsTol is worth a lot:

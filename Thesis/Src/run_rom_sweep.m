@@ -128,14 +128,17 @@ function run_rom_sweep(Struct, contact, shock, cfg, run_dir)
                         end
                         cpu_time = toc;
 
-                        % Back through T_CC first and only then through Pc:
-                        % applying blkdiag(Phi_CC, I) to the time history is
-                        % far cheaper than forming Pc*T_CC.
+                        % Back through the interface transformation first and
+                        % only then through Pc: applying T (a few hundred rows)
+                        % to the time history is far cheaper than forming Pc*T.
+                        % T comes from the reduction rather than being rebuilt
+                        % as blkdiag(Phi_CC, I) here, because the refined basis
+                        % is NOT block diagonal - it couples the interface to
+                        % the substructure modes.
                         if n_cc == 0
                             q_full = q_rom;
                         else
-                            q_full = [ir.Phi_CC * q_rom(1:n_cc, :); ...
-                                      q_rom(n_cc+1:end, :)];
+                            q_full = ir.info.T * q_rom;
                         end
                         y_contact = extract_contact_response(Struct, ...
                             contact.Interfaces, labels, Pc * q_full);
@@ -179,6 +182,12 @@ function ir = apply_interface_reduction(Mr, Kr, Cr, F_r_full, rom, model, ...
     do_static = isfield(cfg.interface_reduction, 'static_correction') && ...
                 cfg.interface_reduction.static_correction;
 
+    % Refinement of the CC modes (Ahn et al. 2022). Independent of the contact
+    % compliance above: that one changes the contact law, this one changes the
+    % basis. They compose, and either can be used alone.
+    do_refine = isfield(cfg.interface_reduction, 'refine') && ...
+                cfg.interface_reduction.refine;
+
     % Optional: give every contact face the same number of CC modes, instead of
     % letting the frequency pooling decide the split. n_cc is distributed as
     % evenly as possible over the faces (exactly equal when it is a multiple of
@@ -196,7 +205,7 @@ function ir = apply_interface_reduction(Mr, Kr, Cr, F_r_full, rom, model, ...
 
     [ir.M, ir.K, ir.C, ir.Phi_CC, ir.info] = interface_reduction( ...
         Mr, Kr, Cr, rom.n_bnd, n_cc, cfg.interface_reduction.mode, ...
-        contact.blocks, pencil, do_static, cc_alloc);
+        contact.blocks, pencil, do_static, cc_alloc, do_refine);
 
     ir.mode = ir.info.mode;
     switch ir.mode
@@ -204,18 +213,26 @@ function ir = apply_interface_reduction(Mr, Kr, Cr, F_r_full, rom, model, ...
         case 'per_interface', ir.tag = [model 'IRP'];
         otherwise,            ir.tag = [model 'IR'];
     end
-    % The correction changes the model, so it must change the file name too:
-    % without this the corrected and uncorrected runs write the SAME file and
-    % the second silently overwrites the first. The suffix is letters only,
-    % which is what the post-processing method parser accepts, so a corrected
-    % run simply appears as its own method next to the plain one.
-    if ~isempty(ir.info) && isfield(ir.info, 'R_res') && ~isempty(ir.info.R_res)
-        ir.tag = [ir.tag 'SC'];
+    % A correction changes the model, so it must change the file name too:
+    % without this a corrected and an uncorrected run write the SAME file and
+    % the second silently overwrites the first. The suffixes are letters only,
+    % which is what the post-processing method parser accepts, so each variant
+    % appears as its own method next to the plain one. They can both be on:
+    %   SC  series contact compliance (corrects the contact law)
+    %   RF  refined CC modes (corrects the basis)
+    if ~isempty(ir.info)
+        if isfield(ir.info, 'R_res') && ~isempty(ir.info.R_res)
+            ir.tag = [ir.tag 'SC'];
+        end
+        if isfield(ir.info, 'refined') && ir.info.refined
+            ir.tag = [ir.tag 'RF'];
+        end
     end
 
-    % T_CC' applied to the projected forcing, without forming T_CC: it is
-    % blkdiag(Phi_CC, I).
-    ir.F = [ir.Phi_CC' * F_r_full(1:rom.n_bnd); F_r_full(rom.n_bnd+1:end)];
+    % T' applied to the projected forcing. Taken from the reduction, not rebuilt
+    % from Phi_CC: the refined transformation carries an interface/substructure
+    % coupling block that blkdiag(Phi_CC, I) does not have.
+    ir.F = ir.info.T' * F_r_full;
     ir.offline = t_off + toc(tic_ir);
 end
 
@@ -235,8 +252,10 @@ function [t, q] = integrate_penalty(ir, rom, contact, Pc, n_cc, z0, ...
     Nb_rom = N_run(:, 1:rom.n_bnd);
 
     if n_cc > 0
-        % Right-multiplication by T_CC = blkdiag(Phi_CC, I), never formed.
-        N_run = [N_run(:, 1:rom.n_bnd) * ir.Phi_CC, N_run(:, rom.n_bnd+1:end)];
+        % Right-multiplication by the interface transformation. Taken from the
+        % reduction rather than assumed block diagonal: after refinement it is
+        % not, so N_run(:,1:n_bnd)*Phi_CC would drop the coupling block.
+        N_run = N_run * ir.info.T;
     end
 
     % Compliance of the interface content removed by the truncation, mapped onto

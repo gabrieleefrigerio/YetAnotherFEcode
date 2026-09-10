@@ -167,9 +167,42 @@ n_faces = numel(faces);
 fprintf('Eref = %.4e\n', R.Eref);
 
 %% --- 3. Log and accumulator -------------------------------------------
-fom_files = dir(fullfile(results_dir, 'FOM_*.mat'));
+fom_files = dir(fullfile(results_dir, 'FOM*_Q*.mat'));   % FOM_, FOMGA_, FOMNM_
 if isempty(fom_files)
-    error('PP:NoFOM', 'No FOM_*.mat file: a reference is needed for the comparison.');
+    error('PP:NoFOM', 'No FOM*_Q*.mat file: a reference is needed for the comparison.');
+end
+
+% --- were all these results timed on the same machine? ---
+% Accuracy is machine independent and can be produced anywhere, so splitting a
+% sweep across whatever hardware is free is legitimate. cpu_time is NOT: a
+% speedup built from a reference timed on one host and ROMs timed on another
+% is a ratio between two computers. Nothing downstream could notice, hence
+% this check, before any of the work rather than after it.
+all_files = [fom_files; dir(fullfile(results_dir, 'ROM_*.mat'))];
+hosts = cell(numel(all_files), 1);
+for i_h = 1:numel(all_files)
+    w = whos('-file', fullfile(results_dir, all_files(i_h).name));
+    if any(strcmp({w.name}, 'host'))
+        h = load(fullfile(results_dir, all_files(i_h).name), 'host');
+        hosts{i_h} = h.host;
+    else
+        hosts{i_h} = '<unrecorded>';   % written before run_host existed
+    end
+end
+uh = unique(hosts);
+if numel(uh) > 1
+    fprintf(2, '\n*** TIMINGS COME FROM %d DIFFERENT MACHINES ***\n', numel(uh));
+    for i_h = 1:numel(uh)
+        fprintf(2, '   %-20s %d file(s)\n', uh{i_h}, nnz(strcmp(hosts, uh{i_h})));
+    end
+    fprintf(2, ['   The GRE and the tracking time are unaffected. Every cost\n' ...
+                '   number - cpu_time, speedup, the Pareto plot - is NOT\n' ...
+                '   comparable across these files.\n\n']);
+    warning('PP:MixedHosts', ...
+        'Results timed on %d different machines; cost comparisons are invalid.', ...
+        numel(uh));
+else
+    fprintf('All results timed on: %s\n', uh{1});
 end
 
 % Closed explicitly at the end: in a script the variables stay in the base
@@ -198,15 +231,23 @@ TRK.name = {};      % [n_rom x 1] label
 
 %% --- 4. Loop over the cases (Q, k_mult) -------------------------------
 for i_fom = 1:numel(fom_files)
-    tok = regexp(fom_files(i_fom).name, 'FOM_Q([\d\.eE+-]+)_K([\d\.eE+-]+)\.mat', 'tokens');
+    % FOM_ is ode15s, FOMGA_ generalized-alpha, FOMNM_ Newmark: the integrator
+    % is part of the name because it is part of the model.
+    tok = regexp(fom_files(i_fom).name, 'FOM([A-Z]*)_Q([\d\.eE+-]+)_K([\d\.eE+-]+)\.mat', 'tokens');
     if isempty(tok), continue; end
-    Q_val = str2double(tok{1}{1});
-    K_val = str2double(tok{1}{2});
+    switch tok{1}{1}
+        case '',   integ_tag = 'ode15s';
+        case 'GA', integ_tag = 'generalized-alpha';
+        case 'NM', integ_tag = 'Newmark';
+        otherwise, integ_tag = tok{1}{1};
+    end
+    Q_val = str2double(tok{1}{2});
+    K_val = str2double(tok{1}{3});
 
     fprintf('\n======================================================\n');
-    fprintf('Case: Q = %g | k_mult = %g\n', Q_val, K_val);
+    fprintf('Case: Q = %g | k_mult = %g | integrator %s\n', Q_val, K_val, integ_tag);
     fprintf('======================================================\n');
-    fprintf(log_file, '>>> CASE: Q = %g | k_mult = %g <<<\n', Q_val, K_val);
+    fprintf(log_file, '>>> CASE: Q = %g | k_mult = %g | %s <<<\n', Q_val, K_val, integ_tag);
 
     % Named variables only. With cfg.save_full_field the FOM file also holds
     % the full displacement field, which is hundreds of MB and is needed by

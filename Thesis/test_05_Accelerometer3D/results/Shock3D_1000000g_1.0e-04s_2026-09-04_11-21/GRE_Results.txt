@@ -7,6 +7,16 @@
  Eref = 1.4948e+05
 
 >>> CASE: Q = 1000 | k_mult = 0.003125 <<<
+  CBIRP     Phi 200 | CC  16 | GRE_full  100.0103% | GRE_win  100.0253% | Off     6.8s | On    11.9s
+               within 1%:  0.16 us  (inside 0%)
+  CBIRP     Phi 200 | CC  32 | GRE_full  107.1026% | GRE_win  110.6956% | Off     6.8s | On    24.0s
+               within 1%:  0.30 us  (inside 0%)
+  CBIRP     Phi 200 | CC  64 | GRE_full  121.6025% | GRE_win  116.0313% | Off     6.8s | On    76.3s
+               within 1%:  1.20 us  (inside 1%)
+  CBIRP     Phi 200 | CC 128 | GRE_full  133.5647% | GRE_win   75.4199% | Off     6.8s | On   224.2s
+               within 1%:  3.16 us  (inside 2%)
+  CB        Phi 200 | CC   - | GRE_full   12.0607% | GRE_win    0.6059% | Off     6.8s | On   453.4s
+               within 1%:  32.52 us  (inside 33%)
   RubinIRP  Phi 200 | CC  16 | GRE_full  100.0103% | GRE_win  100.0253% | Off     7.4s | On    10.4s
                within 1%:  0.16 us  (inside 0%)
   RubinIRP  Phi 200 | CC  32 | GRE_full  107.1024% | GRE_win  110.6952% | Off     7.4s | On    13.2s
@@ -15,17 +25,21 @@
                within 1%:  1.20 us  (inside 1%)
   RubinIRP  Phi 200 | CC 128 | GRE_full  133.8855% | GRE_win   75.4711% | Off     7.4s | On   142.6s
                within 1%:  3.16 us  (inside 2%)
-  RubinIRP  Phi 200 | CC 232 | GRE_full    1.2379% | GRE_win    0.0092% | Off     7.4s | On   345.8s
-               within 1%:  79.88 us  (inside 82%)
   Rubin     Phi 200 | CC   - | GRE_full    1.2384% | GRE_win    0.0092% | Off     7.4s | On   361.3s
                within 1%:  79.88 us  (inside 82%)
 
 
 --- Tracking time ---
 ROM                         < 0.1%        < 1%       < 10%
+CBIRP Phi200 CC16          0.08us     0.16us     0.36us
+CBIRP Phi200 CC32          0.18us     0.30us     0.52us
+CBIRP Phi200 CC64          0.26us     1.20us     3.12us
+CBIRP Phi200 CC128         0.42us     3.16us     5.74us
+CB Phi200                  3.34us    32.52us    81.42us
 RubinIRP Phi200 CC16       0.08us     0.16us     0.36us
 RubinIRP Phi200 CC32       0.18us     0.30us     0.52us
 RubinIRP Phi200 CC64       0.26us     1.20us     3.12us
 RubinIRP Phi200 CC128      0.42us     3.16us     5.74us
-RubinIRP Phi200 CC232     60.68us    79.88us  >100.00us
 Rubin Phi200              60.66us    79.88us  >100.00us
+
+--- Observed convergence order (GRE_full ~ phi^-p) ---

@@ -88,6 +88,23 @@ classdef TransientSolverOde < handle
             % Empty means the plain penalty law. See the effective stiffness in
             % state_space below for what it does.
             addParameter(p, 'ContactCompliance', []);
+            % Step bounds. MaxStep defaults to dt, which is what every run so
+            % far used; passing it explicitly allows testing whether that
+            % ceiling is what costs the time, since it forces at least
+            % tmax/MaxStep steps whatever the dynamics does.
+            addParameter(p, 'MaxStep', []);
+            % MinStep is NOT a throttle. When a step fails and the solver would
+            % have to go below it, ode15s warns IntegrationTolNotMet and
+            % RETURNS EARLY with a truncated solution (see ode15s.m ~570 and
+            % ~626). It therefore buys no speed on a run that succeeds: its use
+            % is as a watchdog, to find out in minutes instead of hours that an
+            % integration has gone pathological.
+            addParameter(p, 'MinStep', []);
+            % Passthrough for an ode15s OutputFcn. Its use here is to time a
+            % reference run without paying for it in full: a function that logs
+            % (t, wall clock) and returns 1 past a budget turns a twenty hour
+            % integration into a twenty minute measurement of its rate.
+            addParameter(p, 'OutputFcn', []);
             parse(p, varargin{:});
             args = p.Results;
 
@@ -188,9 +205,17 @@ classdef TransientSolverOde < handle
                     min(abstol), max(abstol), reltol);
             end
 
-            options = odeset('RelTol', reltol, 'AbsTol', abstol, 'MaxStep', dt, ...
+            max_step = args.MaxStep;
+            if isempty(max_step), max_step = dt; end
+            options = odeset('RelTol', reltol, 'AbsTol', abstol, 'MaxStep', max_step, ...
                 'Mass', M_state, 'MassSingular', sing_flag, ...
                 'Jacobian', jac_handle, 'Stats', args.Stats);
+            if ~isempty(args.MinStep)
+                options = odeset(options, 'MinStep', args.MinStep);
+            end
+            if ~isempty(args.OutputFcn)
+                options = odeset(options, 'OutputFcn', args.OutputFcn);
+            end
 
             % --- integration ---
             fprintf('Integrating %s model with analytical Jacobian (RelTol %g)...\n', ...
@@ -226,100 +251,11 @@ classdef TransientSolverOde < handle
                 f = [qd; F_ext_handle(t_curr) - K*q - C*qd - F_pen];
             end
 
-            function [fa, act] = contact_solve(pen, k_pen, Scomp)
-                % Contact force and the ACTIVE SET consistent with it.
-                %
-                % Without the compliance correction each constraint is
-                % independent: it is active where the penetration is positive,
-                % and the force is k*p. That is the plain penalty law.
-                %
-                % With the correction the constraints are COUPLED, because the
-                % interface deforms under the contact load and that deformation
-                % is felt by the neighbours. The penetration a spring actually
-                % sees is then
-                %
-                %       p_true = p - S*f
-                %
-                % and activity has to be decided on p_true, not on p. Deciding
-                % it on p and then solving the coupled system on that set is
-                % what a first version of this did, and it is WRONG in a way
-                % that is expensive rather than merely inaccurate: a node
-                % entering the set changes the matrix being inverted, so every
-                % activation makes the force on all the other nodes jump. On the
-                % 3D model that was a 24% discontinuity at every event, and
-                % ode15s restarted at each one - the run went from 10 seconds to
-                % over twenty minutes without finishing.
-                %
-                % Iterating the set to consistency removes the discontinuity:
-                % measured, the largest jump between adjacent samples falls from
-                % 23.6% of the force scale to 0.34%, which is just the sampling
-                % of a continuous curve. Since diag(1/k)+S is positive definite
-                % the complementarity problem has a unique solution and the loop
-                % converges in 1.23 iterations on average, 2 at worst, so the
-                % correction costs barely more than the single solve it replaces.
-                act = pen > 0;
-                if isempty(Scomp)
-                    fa = k_pen(act) .* pen(act);
-                    return
-                end
-
-                for sweep = 1:40
-                    if any(act)
-                        fa = (diag(1 ./ k_pen(act)) + Scomp(act, act)) \ pen(act);
-                    else
-                        fa = zeros(0, 1);
-                    end
-
-                    f_full = zeros(numel(pen), 1);
-                    f_full(act) = fa;
-                    p_true = pen - Scomp * f_full;
-
-                    act_new = act;
-                    act_new(act  & f_full <= 0) = false;   % pulled, so not touching
-                    act_new(~act & p_true  > 0) = true;    % pushed in by a neighbour
-                    if isequal(act_new, act), return; end
-                    act = act_new;
-                end
-
-                % Did not settle in the sweep budget (a degenerate active set
-                % can cycle). Return a force CONSISTENT with the final act -
-                % solving on it and dropping any pulling node - so that fa and
-                % act always match in length. Omitting this is what let a stale
-                % fa reach the caller and crash the state-space product.
-                if any(act)
-                    fa = (diag(1 ./ k_pen(act)) + Scomp(act, act)) \ pen(act);
-                    keep = fa > 0;
-                    if ~all(keep)
-                        idx = find(act);
-                        act(idx(~keep)) = false;
-                        fa = fa(keep);
-                    end
-                else
-                    fa = zeros(0, 1);
-                end
-            end
             function J = jacobian_contact(~, y, K, C, Nop, Nop_t, g, k_pen, Scomp)
                 n = size(K, 1);
-
-                % Same active set as the force, so the Jacobian is the exact
-                % derivative of what state_space returns. Deciding activity
-                % separately here would give ode15s an inconsistent pair.
-                [~, act] = contact_solve(Nop*y(1:n) - g, k_pen, Scomp);
-
-                if any(act)
-                    if isempty(Scomp)
-                        K_eff = K + Nop_t(:, act) * (k_pen(act) .* Nop(act, :));
-                    else
-                        Keff_a = (diag(1 ./ k_pen(act)) + Scomp(act, act)) \ Nop(act, :);
-                        K_eff  = K + Nop_t(:, act) * Keff_a;
-                    end
-                else
-                    K_eff = K;
-                end
-
-                Z = sparse(n, n);
-                I = speye(n);
-                J = [Z, I; -K_eff, -C];
+                % Same call as the force, so the pair is exact by construction.
+                [~, K_eff] = contact_tangent(y(1:n), K, Nop, Nop_t, g, k_pen, Scomp);
+                J = [sparse(n, n), speye(n); -K_eff, -C];
             end
         end
     end
