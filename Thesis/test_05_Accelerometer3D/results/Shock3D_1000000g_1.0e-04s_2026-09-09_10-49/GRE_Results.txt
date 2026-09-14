@@ -1,0 +1,42 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & TIME REPORT - 3D
+======================================================
+ Interfaces: stop_A_top, stop_A_bot, stop_B_top, stop_B_bot, stop_C_top, stop_C_bot, stop_D_top, stop_D_bot
+ Reference metric: GRE_full (window 25%)
+ Integration floor: 6.10e-06 %
+ Eref = 1.4948e+05
+
+>>> CASE: Q = 1000 | k_mult = 0.003125 <<<
+  CBIRGRF   Phi 200 | CC  16 | GRE_full   45.9534% | GRE_win   34.0734% | Off     6.6s | On    86.6s
+               within 1%:  3.22 us  (inside 2%)
+  CBIRGRF   Phi 200 | CC  32 | GRE_full   92.7424% | GRE_win   13.8371% | Off     6.5s | On   102.7s
+               within 1%:  3.38 us  (inside 3%)
+  CBIRGRF   Phi 200 | CC  64 | GRE_full  153.9870% | GRE_win   36.9961% | Off     6.6s | On   184.4s
+               within 1%:  3.32 us  (inside 3%)
+  CBIRGRF   Phi 200 | CC 128 | GRE_full  101.0698% | GRE_win    5.1782% | Off     6.6s | On   229.3s
+               within 1%:  6.34 us  (inside 7%)
+  CBIRG     Phi 200 | CC  16 | GRE_full   90.0147% | GRE_win   17.3985% | Off     6.5s | On    85.3s
+               within 1%:  3.24 us  (inside 2%)
+  CBIRG     Phi 200 | CC  32 | GRE_full  114.5722% | GRE_win   17.5664% | Off     6.5s | On    90.1s
+               within 1%:  3.38 us  (inside 3%)
+  CBIRG     Phi 200 | CC  64 | GRE_full   74.8907% | GRE_win   12.2281% | Off     6.5s | On   137.8s
+               within 1%:  3.34 us  (inside 3%)
+  CBIRG     Phi 200 | CC 128 | GRE_full   27.8238% | GRE_win    4.1537% | Off     6.5s | On   202.4s
+               within 1%:  6.40 us  (inside 7%)
+  CB        Phi 200 | CC   - | GRE_full   12.0607% | GRE_win    0.6059% | Off     6.5s | On   399.0s
+               within 1%:  32.52 us  (inside 33%)
+
+
+--- Tracking time ---
+ROM                         < 0.1%        < 1%       < 10%
+CBIRGRF Phi200 CC16        0.82us     3.22us     5.92us
+CBIRGRF Phi200 CC32        0.84us     3.38us     9.72us
+CBIRGRF Phi200 CC64        0.92us     3.32us    12.36us
+CBIRGRF Phi200 CC128       3.22us     6.34us    30.12us
+CBIRG Phi200 CC16          0.82us     3.24us     8.54us
+CBIRG Phi200 CC32          0.86us     3.38us    12.58us
+CBIRG Phi200 CC64          0.94us     3.34us    14.62us
+CBIRG Phi200 CC128         3.22us     6.40us    37.36us
+CB Phi200                  3.34us    32.52us    81.42us
+
+--- Observed convergence order (GRE_full ~ phi^-p) ---

@@ -126,10 +126,10 @@ show_spatial_view = false;
 % cfg.save_full_field, which makes run_fom store the full displacement field.
 % Without it the animation still works, but the mesh stays static and only the
 % contact nodes move: the result file holds the response at those nodes alone.
-make_animation = false;
+make_animation = true;
 if ~isempty(pp_anim), make_animation = pp_anim; end
 anim_amplify   = 8;      % displacements are microns on a structure 400 um wide
-anim_stride    = 1;      % one frame every N output samples
+anim_stride    = 3;      % one frame every N output samples
 
 switch lower(gre_mode)
     case 'window'
@@ -216,7 +216,7 @@ fprintf(log_file, ' Reference metric: %s (window %.0f%%)\n', gre_tag, 100*win_fr
 fprintf(log_file, ' Integration floor: %.2e %%\n', gre_floor_pct);
 fprintf(log_file, ' Eref = %.4e\n\n', R.Eref);
 
-summary = struct('method', {}, 'phi', {}, 'n_cc', {}, 'ir_mode', {}, ...
+summary = struct('method', {}, 'phi', {}, 'n_cc', {}, 'ir_mode', {}, 'integrator', {}, ...
                  'Q', {}, 'K', {}, ...
                  'gre_full', {}, 'gre_win', {}, 'gre_ref', {}, ...
                  't_track_us', {}, 't_track_cens', {}, 'frac_track', {}, ...
@@ -243,6 +243,11 @@ for i_fom = 1:numel(fom_files)
     end
     Q_val = str2double(tok{1}{2});
     K_val = str2double(tok{1}{3});
+    % Suffix for everything this case writes. Empty for ode15s so existing
+    % folders keep their names; without it two FOM references in one folder
+    % produce figures with identical names and the second silently overwrites
+    % the first, which is the same collision the file names themselves had.
+    if isempty(tok{1}{1}), itag = ''; else, itag = ['_' tok{1}{1}]; end
 
     fprintf('\n======================================================\n');
     fprintf('Case: Q = %g | k_mult = %g | integrator %s\n', Q_val, K_val, integ_tag);
@@ -428,7 +433,7 @@ for i_fom = 1:numel(fom_files)
             % Tracking time. It is fed the SAME curve that gets plotted, so
             % the number in the table and the crossing visible in the figure
             % can never disagree.
-            rom_label = sprintf('%s Phi%d', method, phi_val);
+            rom_label = sprintf('%s Phi%d%s', method, phi_val, strrep(itag,'_',' '));
             if n_cc_val > 0
                 rom_label = sprintf('%s CC%d', rom_label, n_cc_val);
             end
@@ -481,6 +486,7 @@ for i_fom = 1:numel(fom_files)
             vis_links{end+1} = linkprop(h_this, 'Visible'); %#ok<SAGROW>
 
             summary(end+1) = struct('method', method, 'phi', phi_val, ...
+                'integrator', integ_tag, ...
                 'n_cc', n_cc_val, 'ir_mode', ir_mode_val, ...
                 'Q', Q_val, 'K', K_val, 'gre_full', gre_full, 'gre_win', gre_win, ...
                 'gre_ref', gre_ref, ...
@@ -540,7 +546,7 @@ for i_fom = 1:numel(fom_files)
             '   -   shaded band = spread over the face'], ...
             method, Q_val, K_val, qdesc), 'FontSize', 13, 'FontWeight', 'bold');
 
-        base_name = fullfile(results_dir, sprintf('Compare_%s_Q%g_K%g', method, Q_val, K_val));
+        base_name = fullfile(results_dir, sprintf('Compare_%s_Q%g_K%g%s', method, Q_val, K_val, itag));
         exportgraphics(fig, [base_name '.png'], 'Resolution', 200);
         savefig(fig, [base_name '.fig']);
         fprintf('  -> figure saved: %s.png\n', base_name);
@@ -573,7 +579,7 @@ for i_fom = 1:numel(fom_files)
                 end
 
                 gif_name = fullfile(results_dir, ...
-                    sprintf('Animation_FOM_Q%g_K%g.gif', Q_val, K_val));
+                    sprintf('Animation_FOM_Q%g_K%g%s.gif', Q_val, K_val, itag));
                 fprintf('  Rendering the animation (stride %d)...\n', anim_stride);
                 animate_contact_3d(Struct, R.Interfaces, faces, fom.y_contact, ...
                     t_ref, 'Amplify', anim_amplify, 'Stride', anim_stride, ...

@@ -72,10 +72,10 @@ R = load(cfg_file);
 n_faces = numel(faces);
 
 %% --- 2. Which files to draw -------------------------------------------
-listing = [dir(fullfile(results_dir, 'FOM_*.mat')); ...
+listing = [dir(fullfile(results_dir, 'FOM*.mat')); ...
            dir(fullfile(results_dir, 'ROM_*.mat'))];
 if isempty(listing)
-    error('PT:NoResults', 'No FOM_*.mat or ROM_*.mat in %s.', results_dir);
+    error('PT:NoResults', 'No FOM*.mat or ROM_*.mat in %s.', results_dir);
 end
 names = {listing.name};
 
@@ -109,7 +109,7 @@ for i = 1:numel(sel)
     elseif isfield(S, 'model'),  lbl = S.model;
     else,                        lbl = strrep(sel{i}, '.mat', '');
     end
-    if isfield(S, 'n_modes') && ~isempty(S.n_modes) && ~strcmpi(lbl, 'FOM')
+    if isfield(S, 'n_modes') && ~isempty(S.n_modes) && ~startsWith(lbl, 'FOM')
         lbl = sprintf('%s phi=%d', lbl, S.n_modes);
     end
     if isfield(S, 'n_cc') && ~isempty(S.n_cc) && S.n_cc > 0

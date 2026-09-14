@@ -103,13 +103,13 @@ cfg.run.FOM   = 1;
 cfg.run.MT    = 0;
 cfg.run.MC    = 0;
 cfg.run.CB    = 0;
-cfg.run.Rubin = 0;
+cfg.run.Rubin = 1;
 cfg.run.MCB   = 0;  
 cfg.run.MN    = 0;
 
 % --- Interface reduction (CB and Rubin only) ---
 cfg.interface_reduction.enabled = 1;
-cfg.interface_reduction.mode    = 'per_interface';   % 'global' | 'per_interface'
+cfg.interface_reduction.mode    = 'global';   % 'global' | 'per_interface'
 % equal_per_face applies only to mode 'per_interface': when true, every contact
 % face gets the SAME number of CC modes. When false, the modes are pooled
 % across faces and chosen by frequency.
@@ -118,14 +118,14 @@ cfg.interface_reduction.basis   = 'guyan';    % 'guyan'  | 'self'
 % static_correction = put back what the truncation throws away. 
 % It applies to the penalty methods with interface reduction (CB, Rubin) only. 
 cfg.interface_reduction.static_correction = true;
-cfg.array_ccModes  = [16, 32, 64, 128, 232]; % 232 = n_bnd, the control point
+cfg.array_ccModes  = [16, 32, 64, 128]; % 232 = n_bnd, the control point
 
 % --- Sweep ---
-cfg.array_linModes = [200];   % 90 is what the previous thesis retained
+cfg.array_linModes = [100];   % 90 is what the previous thesis retained
 
 % --- Damping ---
 % Rayleigh, C = alpha*M + beta*K, so 1/Q(f) = alpha/(2*pi*f) + 2*pi*f*beta.
-cfg.Q_freq         = [7e3, 2e6];    % anchor frequencies [Hz]
+cfg.Q_freq         = [7e3, 50e6];    % anchor frequencies [Hz]
 cfg.array_QFactor  = [5,  200];   % Q at 30 kHz, Q at 5 MHz
 % cfg.array_QFactor  = 1000;
 cfg.array_k_mult   = 0.003125;  % contact stiffness as a multiple of max(diag(K)).
@@ -136,15 +136,15 @@ cfg.array_k_mult   = 0.003125;  % contact stiffness as a multiple of max(diag(K)
                               % would give a contact 32 times stiffer.
 
 % --- Impulsive forcing ---
-cfg.impulse_g   = 1e6;        % amplitude [g]
-cfg.impulse_dir = [0 0 -1];    % direction in space, normalized afterwards
+cfg.impulse_g   = 0.3e6;        % amplitude [g]
+cfg.impulse_dir = [0 0 1];    % direction in space, normalized afterwards
 cfg.g_value     = 9.81e6;     % gravity in um/s^2: the mesh is in um, not m
-cfg.t_shock     = 10e-7;      % half-sine duration [s]
+cfg.t_shock     = 1*1e-6;      % half-sine duration [s]
 
 % --- Integration ---
-cfg.dt        = 2e-9;
-cfg.tmax      = 30e-6;
-cfg.RelTol    = 1e-8;         % ROM
+cfg.dt        = 1e-9;
+cfg.tmax      = 10e-6;
+cfg.RelTol    = 1e-4;         % ROM
 cfg.RelTolFOM = 1e-8;         % FOM
 cfg.output_stride = 10;       % output every N steps of dt
 cfg.integrator    = 'newmark';       % 'ode15s' | 'genalpha' | 'newmark'

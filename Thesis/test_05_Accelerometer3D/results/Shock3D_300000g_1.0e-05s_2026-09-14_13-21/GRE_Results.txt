@@ -1,0 +1,46 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & TIME REPORT - 3D
+======================================================
+ Interfaces: stop_A_top, stop_A_bot, stop_B_top, stop_B_bot, stop_C_top, stop_C_bot, stop_D_top, stop_D_bot
+ Reference metric: GRE_full (window 25%)
+ Integration floor: 6.10e-06 %
+ Eref = 1.3453e+04
+
+>>> CASE: Q = 5 | k_mult = 0.003125 | ode15s <<<
+  RubinIRGSC Phi 100 | CC  16 | GRE_full    4.3700% | GRE_win    0.0003% | Off     4.5s | On     6.9s
+               within 1%:  5.21 us  (inside 52%)
+  RubinIRGSC Phi 100 | CC  32 | GRE_full    4.1317% | GRE_win    0.0003% | Off     4.5s | On    12.3s
+               within 1%:  5.55 us  (inside 54%)
+  RubinIRGSC Phi 100 | CC  64 | GRE_full    4.0338% | GRE_win    0.0003% | Off     4.5s | On    24.0s
+               within 1%:  5.55 us  (inside 53%)
+  RubinIRGSC Phi 100 | CC 128 | GRE_full    4.0396% | GRE_win    0.0003% | Off     4.5s | On    45.2s
+               within 1%:  5.55 us  (inside 54%)
+  RubinIRG  Phi 100 | CC  16 | GRE_full    3.7356% | GRE_win    0.0003% | Off     4.6s | On     6.9s
+               within 1%:  5.95 us  (inside 58%)
+  RubinIRG  Phi 100 | CC  32 | GRE_full    4.6458% | GRE_win    0.0003% | Off     4.5s | On    11.5s
+               within 1%:  5.60 us  (inside 55%)
+  RubinIRG  Phi 100 | CC  64 | GRE_full    1.7366% | GRE_win    0.0003% | Off     4.6s | On    20.7s
+               within 1%:  5.77 us  (inside 60%)
+  RubinIRG  Phi 100 | CC 128 | GRE_full    4.3198% | GRE_win    0.0003% | Off     4.6s | On    37.1s
+               within 1%:  5.56 us  (inside 54%)
+  Rubin     Phi 100 | CC   - | GRE_full    4.0628% | GRE_win    0.0009% | Off     4.5s | On   164.3s
+               within 1%:  5.55 us  (inside 54%)
+  Rubin     Phi 200 | CC   - | GRE_full    0.0948% | GRE_win    0.0003% | Off     7.3s | On   240.8s
+               within 1%: >10.00 us  (inside 100%)
+
+
+--- Tracking time ---
+ROM                         < 0.1%        < 1%       < 10%
+RubinIRGSC Phi100 CC16     4.45us     5.21us   >10.00us
+RubinIRGSC Phi100 CC32     4.45us     5.55us   >10.00us
+RubinIRGSC Phi100 CC64     4.45us     5.55us   >10.00us
+RubinIRGSC Phi100 CC128     4.45us     5.55us   >10.00us
+RubinIRG Phi100 CC16       4.33us     5.95us   >10.00us
+RubinIRG Phi100 CC32       4.55us     5.60us   >10.00us
+RubinIRG Phi100 CC64       4.45us     5.77us   >10.00us
+RubinIRG Phi100 CC128      4.45us     5.56us   >10.00us
+Rubin Phi100               4.45us     5.55us   >10.00us
+Rubin Phi200               8.78us   >10.00us   >10.00us
+
+--- Observed convergence order (GRE_full ~ phi^-p) ---
+  Rubin    : p = 5.42   (2 points)

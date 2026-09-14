@@ -149,8 +149,8 @@ end
 cfg.run.FOM   = 0;
 cfg.run.MT    = 0;
 cfg.run.MC    = 0;
-cfg.run.CB    = 1;
-cfg.run.Rubin = 0;
+cfg.run.CB    = 0;
+cfg.run.Rubin = 1;
 cfg.run.MCB   = 0;    % fixed step: see the stability note at the bottom
 cfg.run.MN    = 0;
 

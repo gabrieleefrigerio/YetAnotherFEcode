@@ -49,8 +49,9 @@ function [Mr2, Kr2, Cr2, Phi_CC, info] = interface_reduction(Mr, Kr, Cr, n_bnd, 
 %                  and the validity condition.
 %     static_correction  logical (optional). Adds back the quasi-static
 %                  flexibility of the truncated CC modes as info.R_res, a local
-%                  contact compliance. Defined for the 'global' basis ONLY; for
-%                  'per_interface' it is skipped and info.R_res stays empty.
+%                  contact compliance. Available to BOTH CC variants: the
+%                  residual flexibility depends on the retained subspace alone,
+%                  not on how it happens to be spanned.
 %     cc_alloc     optional per-face mode allocation, passed to cc_modes;
 %                  'per_interface' only. Empty pools the modes by frequency.
 %     refine       logical (optional). Refines the CC modes with the residual
@@ -140,37 +141,68 @@ end
 % size of T_CC, the file name, the R_res guard - uses the count that was
 % actually produced.
 if nargin < 10, cc_alloc = []; end
-[Phi_CC, w2, modes_per_face] = cc_modes(K_bb, M_bb, n_cc, mode, iface_blocks, DENSE_LIMIT, cc_alloc);
+[Phi_CC, w2, modes_per_face, cc_diag] = cc_modes(K_bb, M_bb, n_cc, mode, iface_blocks, DENSE_LIMIT, cc_alloc);
 n_cc = size(Phi_CC, 2);
-% ---------- residual flexibility of the truncated CC modes (GLOBAL only) ----------
+% ---------- residual flexibility of the truncated CC modes ----------
 % Truncation drops the CC modes above n_cc as if they did not exist. They do
 % exist, and their static deflection is the ingredient BOTH corrections below
 % are built from:
 %
 %       R_res = K_bb^-1 - Phi (Phi' K_bb Phi)^-1 Phi' = sum_{i>n_cc} phi_i phi_i'/w_i^2
 %
-% Computed in the deflated form K_bb\(I - M_bb Phi Phi'), which is the same
-% matrix written so the cancellation happens inside a well-conditioned
-% projector instead of between two large nearly-equal inverses.
+% and it is the residual of a Ritz-Galerkin static solve: for a load f the exact
+% static answer is K^-1 f, the one the retained subspace can produce is
+% Phi (Phi'K Phi)^-1 Phi' f, and R_res f is what is left over. That reading holds
+% for ANY subspace, not just a spectral one, which is why the correction is
+% available to both CC variants.
 %
-% Defined for the 'global' basis only: there Phi is the M_bb-orthonormal set of
-% eigenvectors of the whole boundary pencil. The 'per_interface' variant is
-% orthonormal only within each face's block while M_bb couples the faces, so
-% neither correction is defined for it and both are skipped - those runs use the
-% plain penalty law with the plain basis, exactly like an uncorrected IR.
+% It is computed through a Cholesky of K_bb and a QR, never by forming
+% (Phi'K_bb Phi)^-1:
+%
+%       K_bb = L L' ,   Z = L' Phi ,   Q = orth(Z) ,   X = (I - Q Q') L^-1
+%       R_res = X' X
+%
+% Two of the reasons are what make the correction available at all, and they
+% are the ones that matter:
+%
+%   - INVARIANCE. It never forms (Phi'K_bb Phi)^-1 against a particular
+%     normalisation, so the result depends on the retained subspace and nothing
+%     else. Measured at 4e-17 between the raw per-face basis and its rotation,
+%     which is what lets the per-face variant use the correction at all.
+%   - POSITIVE SEMI-DEFINITENESS by construction, since X'X is a Gram matrix,
+%     rather than by the after-the-fact symmetrisation the old form needed.
+%     contact_solve relies on diag(1/k) + N R_res N' being definite for the
+%     complementarity problem to have a unique solution, so an indefinite
+%     R_res would not be an inaccuracy but an ill-posed contact.
+%
+% The subtraction also happens inside an ORTHOGONAL projector, so nothing is
+% amplified by cond(K_bb)^(1/2) as the algebraic form would be. Measured
+% end-to-end accuracy, though, came out COMPARABLE to the formula this replaces
+% (both within 1e-7 of the spectral sum over the truncated modes, each better
+% than the other at one of the two truncation levels tested): the case for this
+% form rests on the two properties above, not on precision.
 if nargin < 11 || isempty(refine), refine = false; end
 want_static = nargin >= 9 && ~isempty(static_correction) && static_correction && n_cc < n_bnd;
 want_refine = ~isempty(refine) && refine && n_cc < n_bnd;
 is_global   = strcmpi(mode, 'global');
 
+% The refinement, unlike the compliance, is NOT available on the per-face basis,
+% and orthonormalising that basis does not make it available. Ahn's derivation
+% needs the RETAINED and TRUNCATED interface modes to be orthogonal in BOTH
+% K_bb and M_bb, i.e. the retained span must be an invariant (spectral) subspace
+% of the pencil. Orthonormality of the retained set alone says nothing about its
+% complement, and the per-face modes are not eigenvectors of the global pencil
+% by construction. cc_modes reports the Ritz residual, which measures exactly
+% how far from invariant the subspace is.
+if want_refine && ~is_global
+    fprintf(['  [IR] the CC refinement needs a spectral subspace and is skipped ' ...
+             'for ''%s''; the contact compliance is unaffected\n'], lower(mode));
+    want_refine = false;
+end
+
 R_res = [];
-if (want_static || want_refine) && is_global
-    R_res = K_bb \ (eye(n_bnd) - M_bb * (Phi_CC * Phi_CC'));
-    R_res = (R_res + R_res') / 2;
-elseif want_static || want_refine
-    fprintf('  [IR] corrections are only available for the global CC basis; skipped for ''%s''\n', ...
-        lower(mode));
-    want_static = false;  want_refine = false;
+if want_static || want_refine
+    R_res = residual_flexibility(K_bb, Phi_CC);
 end
 
 % ---------- secondary transformation ----------
@@ -224,8 +256,12 @@ Cr2 = T_CC' * Cr * T_CC;   Cr2 = (Cr2 + Cr2') / 2;
 
 % ---------- report ----------
 f_cc = sqrt(max(w2, 0)) / (2*pi);
+% cc_diag.Phi_raw is deliberately NOT propagated: info is saved with every run,
+% and an n_bnd x n_cc block in each file would dwarf the results it documents.
 info = struct('mode', lower(mode), 'basis', basis_src, 'n_cc', n_cc, 'n_bnd', n_bnd, ...
-              'f_cc', f_cc, 'modes_per_face', modes_per_face, 'refined', want_refine);
+              'f_cc', f_cc, 'modes_per_face', modes_per_face, 'refined', want_refine, ...
+              'ortho_before', cc_diag.defect_before, 'ortho_after', cc_diag.defect_after, ...
+              'cond_G', cc_diag.cond_G, 'rotated', cc_diag.rotated);
 
 % The full transformation, so callers never have to assume it is block diagonal:
 % once refined it is not. Reconstruction, the contact operator and the projected
@@ -245,8 +281,39 @@ end
 
 fprintf('  [IR] %s / %s basis | %d/%d interface DOFs retained | CC freq %.3e - %.3e Hz\n', ...
     lower(mode), basis_src, n_cc, n_bnd, f_cc(1), f_cc(end));
+if cc_diag.rotated
+    fprintf('  [IR] CC basis M-orthonormality: %.3e -> %.3e   (cond(G) = %.3e)\n', ...
+        cc_diag.defect_before, cc_diag.defect_after, cc_diag.cond_G);
+else
+    fprintf('  [IR] CC basis M-orthonormality: %.3e\n', cc_diag.defect_before);
+end
 if ~isempty(modes_per_face)
     fprintf('  [IR] modes per face: %s\n', mat2str(modes_per_face));
 end
 
+end
+
+% =====================================================================
+function R_res = residual_flexibility(K_bb, Phi)
+% Static flexibility the retained interface subspace CANNOT produce:
+%
+%       R_res = K_bb^-1 - Phi (Phi' K_bb Phi)^-1 Phi'
+%
+% evaluated as X'X with X = (I - Q Q') L^-1, K_bb = L L', Q = orth(L' Phi).
+% See the derivation at the call site for why this form and not the algebraic
+% one. Invariant under any change of basis inside span(Phi), so it depends on
+% the retained SUBSPACE alone - which is what makes it valid for the per-face
+% variant, whose modes are not eigenvectors of the pencil.
+    n_bnd = size(K_bb, 1);
+    [L, p] = chol(K_bb, 'lower');
+    if p > 0
+        error('IR:InterfaceStiffnessNotSPD', ...
+            ['K_bb is not positive definite, so the residual flexibility is ' ...
+             'undefined. An interface pencil with a zero-energy mode usually ' ...
+             'means the boundary partition is not fully restrained by the ' ...
+             'condensation it came from.']);
+    end
+    [Q, ~] = qr(L' * Phi, 0);
+    X = (eye(n_bnd) - Q * Q') / L;
+    R_res = X' * X;
 end

@@ -1,0 +1,9 @@
+======================================================
+ GLOBAL RELATIVE ERROR (GRE) & TIME REPORT - 3D
+======================================================
+ Interfaces: stop_A_top, stop_A_bot, stop_B_top, stop_B_bot, stop_C_top, stop_C_bot, stop_D_top, stop_D_bot
+ Reference metric: GRE_full (window 25%)
+ Integration floor: 6.10e-06 %
+ Eref = 1.3453e+04
+
+>>> CASE: Q = 5 | k_mult = 0.003125 | ode15s <<<

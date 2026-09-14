@@ -100,7 +100,13 @@ switch lower(family)
             %   'per_interface'  one per contact face, modes localized on a face
             [Kbb, Mbb, Psi] = guyan_interface_pencil(Struct, contact.dofs);
             n_show = max(pick);
-            [Phi_CC, w2] = cc_modes(Kbb, Mbb, n_show, cc_mode, contact.blocks);
+            % The RAW per-face modes, not the rotated basis cc_modes returns for
+            % the reduction. Both span the same subspace, but only the raw ones
+            % are supported on a single contact face, and that localization is
+            % the whole point of looking at a per_interface mode. For 'global'
+            % the two are the same vectors.
+            [~, ~, ~, cc_diag] = cc_modes(Kbb, Mbb, n_show, cc_mode, contact.blocks);
+            Phi_CC = cc_diag.Phi_raw;   w2 = cc_diag.w2_raw;
             V   = Struct.AssemblyObj.unconstrain_vector(Psi * Phi_CC(:, pick));
             lab = arrayfun(@(i) sprintf('CC %d  -  %.4g Hz', i, sqrt(max(w2(i),0))/(2*pi)), ...
                            pick, 'Uni', 0);
